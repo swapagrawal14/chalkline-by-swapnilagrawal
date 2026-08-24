@@ -44,29 +44,36 @@ export function normalizeProject(raw: Project): Project {
   p.notes = p.notes ?? "";
   p.solidColor = p.solidColor ?? "#F4EFE6";
   const { width, height } = canvasSize(p);
-  const hasMusic = Boolean(p.musicSrc);
   for (const scene of p.scenes ?? []) {
     scene.transition = scene.transition ?? "cut";
     scene.hold = typeof scene.hold === "number" ? scene.hold : 0.45;
-    if (hasMusic) scene.hold = Math.min(scene.hold, 0.12);
     scene.captions = scene.captions ?? [];
     scene.layers = (scene.layers ?? []).map((layer) => {
       const anim = resolveAnim(layer.anim);
       anim.speed = Math.min(anim.speed ?? 1, 1);
-      if (layer.type === "image" && layer.image?.filter === "sketch") {
-        layer.image.filter = "none";
+      if (layer.type === "image") {
+        if (layer.image?.filter === "sketch") layer.image.filter = "none";
+        anim.wiggle = false;
       }
       if (layer.type === "text" && layer.text) {
         if (anim.textAnim === "fade") anim.textAnim = "typewriter";
+        if (layer.height >= 56) layer.text.weight = 700;
       }
       const next: Layer = { ...layer, locked: Boolean(layer.locked), anim };
+      if (next.type === "text" && next.text && next.height >= 56) {
+        const lines = Math.max(1, next.text.text.split("\n").length);
+        next.height = Math.max(next.height, Math.min(128, lines * 88));
+      }
       clampLayerToBoard(next, width, height);
       return next;
     });
     const layerEnd = Math.max(0, ...scene.layers.map((l) => l.start + l.duration));
     for (const cap of scene.captions) {
-      if (cap.end > layerEnd + 0.4) cap.end = layerEnd + 0.25;
       if (cap.start < 0) cap.start = 0;
+      if (scene.captions.length === 1) {
+        cap.start = 0;
+        cap.end = Math.max(cap.end, layerEnd);
+      }
     }
   }
   return p;
@@ -123,7 +130,12 @@ export function probeAudioDuration(src: string): Promise<number | null> {
 export async function fitProjectToMusic(project: Project) {
   if (!project.musicSrc) return;
   const duration = await probeAudioDuration(project.musicSrc);
-  if (duration) scaleTimeline(project, duration);
+  if (!duration) return;
+  const cur = projectDuration(project);
+  if (cur < 0.5) return;
+  // Voice-over tracks are near the board length. A 3-minute music bed is not.
+  if (Math.abs(duration - cur) / cur > 0.35) return;
+  scaleTimeline(project, duration);
 }
 
 export async function saveProject(project: Project, thumb?: string) {

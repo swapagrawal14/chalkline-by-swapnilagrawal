@@ -385,7 +385,7 @@ export function renderFrame(
     const caption = scene.scene.captions.find((c) => local >= c.start && local <= c.end);
     if (caption) {
       const span = Math.max(0.001, caption.end - caption.start);
-      const capP = clamp((local - caption.start) / Math.min(0.7, span * 0.4), 0, 1);
+      const capP = clamp((local - caption.start) / (span * 0.92), 0, 1);
       drawCaption(ctx, width, height, caption.text, project.background, capP);
     }
   }
@@ -560,7 +560,7 @@ function drawLayerPartial(
     ctx.scale(s, s);
     ctx.translate(-layer.width / 2, -layer.height / 2);
   }
-  if (anim.wiggle && p < 1) {
+  if (anim.wiggle && p < 1 && layer.type !== "image") {
     ctx.translate(Math.sin(p * 42) * 1.4, Math.cos(p * 33) * 1.2);
     ctx.rotate(Math.sin(p * 21) * 0.015);
   }
@@ -589,9 +589,31 @@ function drawLayerPartial(
   return null;
 }
 
+function textSize(layer: Layer) {
+  const t = layer.text!;
+  const lines = Math.max(1, t.text.split("\n").length);
+  return clamp((layer.height * 0.86) / lines, 34, 118);
+}
+
+function punchColor(hex: string) {
+  const raw = (hex || "#1C1916").replace("#", "");
+  if (raw.length !== 6) return hex || "#1C1916";
+  let r = parseInt(raw.slice(0, 2), 16);
+  let g = parseInt(raw.slice(2, 4), 16);
+  let b = parseInt(raw.slice(4, 6), 16);
+  const max = Math.max(r, g, b);
+  if (max < 48) return "#1A1410";
+  const avg = (r + g + b) / 3;
+  r = clamp(Math.round(avg + (r - avg) * 1.45 + 12), 0, 255);
+  g = clamp(Math.round(avg + (g - avg) * 1.45 + 6), 0, 255);
+  b = clamp(Math.round(avg + (b - avg) * 1.45), 0, 255);
+  const to = (n: number) => n.toString(16).padStart(2, "0");
+  return `#${to(r)}${to(g)}${to(b)}`;
+}
+
 function fontFor(layer: Layer) {
   const t = layer.text!;
-  const size = Math.max(18, layer.height * 0.55);
+  const size = textSize(layer);
   const family =
     t.font === "hand"
       ? "Caveat, cursive"
@@ -600,7 +622,7 @@ function fontFor(layer: Layer) {
         : t.font === "mono"
           ? "IBM Plex Mono, monospace"
           : "Source Sans 3, sans-serif";
-  const weight = t.weight;
+  const weight = t.font === "hand" ? 700 : Math.max(t.weight, 600);
   return `${weight} ${size}px ${family}`;
 }
 
@@ -613,11 +635,12 @@ function drawText(
   const t = layer.text!;
   const anim = resolveAnim(layer.anim);
   ctx.font = fontFor(layer);
-  ctx.fillStyle = t.color;
+  const ink = punchColor(t.color);
+  ctx.fillStyle = ink;
   ctx.textBaseline = "middle";
   ctx.textAlign = t.align;
   const lines = t.text.split("\n");
-  const size = Math.max(18, layer.height * 0.55);
+  const size = textSize(layer);
   const lh = size * t.lineHeight;
   let ax = layer.width / 2;
   if (t.align === "left") ax = 8;
@@ -660,6 +683,13 @@ function drawText(
           used++;
         }
       }
+      ctx.fillStyle = seed.highlight;
+      const visW = ctx.measureText(visible).width;
+      if (visW > 2) {
+        const hx = t.align === "center" ? ax - visW / 2 : t.align === "right" ? ax - visW : ax;
+        ctx.fillRect(hx - 6, y - size * 0.48, visW + 12, size * 0.98);
+      }
+      ctx.fillStyle = ink;
       ctx.fillText(visible, ax, y);
       lastX = ax + (t.align === "center" ? ctx.measureText(visible).width / 2 : ctx.measureText(visible).width);
       lastY = y;
@@ -732,7 +762,7 @@ function drawText(
       ctx.translate(cx, y);
       ctx.rotate((-8 + (count % 5) * 3) * (Math.PI / 180) * wobble);
       ctx.scale(1, 0.86 + 0.14 * localP);
-      ctx.fillStyle = t.color;
+      ctx.fillStyle = ink;
       ctx.fillText(ch, 0, 0);
       ctx.restore();
       cx += ctx.measureText(ch).width;
@@ -741,7 +771,7 @@ function drawText(
     }
     if (visW > 4) {
       ctx.save();
-      ctx.strokeStyle = t.color;
+      ctx.strokeStyle = ink;
       ctx.globalAlpha = 0.55;
       ctx.lineWidth = Math.max(2.2, size * 0.07);
       ctx.lineCap = "round";
@@ -995,6 +1025,66 @@ function scribbleReveal(
   return tip;
 }
 
+function colorReveal(
+  ctx: CanvasRenderingContext2D,
+  bitmap: HTMLCanvasElement,
+  w: number,
+  h: number,
+  p: number,
+  style: string,
+  seed: ReturnType<typeof sceneSeed>,
+) {
+  const u = clamp(p, 0.02, 1);
+  if (
+    style === "scribble" ||
+    style === "zigzag" ||
+    style === "contour" ||
+    style === "chunks" ||
+    style === "scatter"
+  ) {
+    return scribbleReveal(ctx, bitmap, w, h, u, seed.scribble);
+  }
+
+  ctx.save();
+  ctx.beginPath();
+  let hx = w * u;
+  let hy = h * 0.5;
+  if (style === "wipe-left") {
+    ctx.rect(w * (1 - u), 0, w * u, h);
+    hx = w * (1 - u);
+  } else if (style === "wipe-down" || style === "rain") {
+    ctx.rect(0, 0, w, h * u);
+    hx = w * 0.5;
+    hy = h * u;
+  } else if (style === "wipe-up") {
+    ctx.rect(0, h * (1 - u), w, h * u);
+    hx = w * 0.5;
+    hy = h * (1 - u);
+  } else if (style === "radial" || style === "spiral" || style === "portrait" || style === "reverse-spiral") {
+    const r = Math.hypot(w, h) * 0.64 * u;
+    ctx.arc(w / 2, h / 2, Math.max(10, r), 0, Math.PI * 2);
+    hx = w / 2 + r * 0.55;
+    hy = h / 2;
+  } else if (style === "diagonal" || style === "diamond") {
+    const s = Math.hypot(w, h) * u;
+    ctx.moveTo(w / 2, h / 2 - s);
+    ctx.lineTo(w / 2 + s, h / 2);
+    ctx.lineTo(w / 2, h / 2 + s);
+    ctx.lineTo(w / 2 - s, h / 2);
+    ctx.closePath();
+    hx = w / 2 + s * 0.35;
+    hy = h / 2;
+  } else {
+    ctx.rect(0, 0, w * u, h);
+    hx = w * u;
+    hy = h * 0.5;
+  }
+  ctx.clip();
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  ctx.restore();
+  return { x: clamp(hx, 0, w), y: clamp(hy, 0, h) };
+}
+
 function drawImageLayer(
   ctx: CanvasRenderingContext2D,
   prep: PreparedLayer,
@@ -1004,78 +1094,12 @@ function drawImageLayer(
   const layer = prep.layer;
   const anim = resolveAnim(layer.anim);
   const bitmap = prep.bitmap!;
-  const scribbleOn =
-    anim.style === "scribble" || anim.style === "scanner" || anim.style === "zigzag" || anim.style === "contour";
-  if (scribbleOn) {
-    const tip = scribbleReveal(ctx, bitmap, layer.width, layer.height, Math.max(p, 0.04), seed.scribble);
-    if (p >= 1) {
-      ctx.drawImage(bitmap, 0, 0, layer.width, layer.height);
-      return null;
-    }
-    return { x: tip.x, y: tip.y, style: anim.hand };
-  }
-  const cells = prep.cells!;
-  const order = anim.reverse ? [...prep.order!].reverse() : prep.order!;
-  const style = anim.drawStyle;
-  const sketchUntil = style === "reveal" ? 0 : style === "outline" ? 1 : 0.58;
-  const n = order.length;
-  const sketchCount = Math.floor(clamp(p / Math.max(0.001, sketchUntil), 0, 1) * n);
-  const fillP =
-    style === "outline" || style === "marker"
-      ? 0
-      : clamp((p - sketchUntil) / Math.max(0.001, 1 - sketchUntil), 0, 1);
-  const fillCount = Math.floor(fillP * n);
-
-  ctx.save();
-  ctx.strokeStyle = anim.color;
-  ctx.lineCap = "round";
-  applyStrokeStyle(ctx, anim.strokeStyle, anim.strokeWidth);
-  const jitter = anim.sketchiness * 2.2;
-  const upto = style === "reveal" ? 0 : sketchCount;
-  for (let i = 0; i < upto; i++) {
-    const cell = cells[order[i]!]!;
-    for (const s of cell.strokes) {
-      const j = ((i * 17) % 5) - 2;
-      ctx.beginPath();
-      ctx.moveTo(s.x1 + j * jitter * 0.15, s.y1);
-      ctx.lineTo(s.x2 + j * jitter * 0.1, s.y2 + j * 0.2);
-      ctx.stroke();
-    }
-  }
-  ctx.restore();
-
-  if (fillCount > 0 && style !== "outline") {
-    ctx.save();
-    ctx.beginPath();
-    for (let i = 0; i < fillCount; i++) {
-      const cell = cells[order[i]!]!;
-      if (anim.fillReveal === "iris") {
-        const r = Math.max(cell.w, cell.h) * 0.7;
-        ctx.moveTo(cell.cx + r, cell.cy);
-        ctx.arc(cell.cx, cell.cy, r, 0, Math.PI * 2);
-      } else if (anim.fillReveal === "dissolve") {
-        if ((i + Math.floor(p * 17)) % 3 !== 0) {
-          ctx.rect(cell.x, cell.y, cell.w + 0.6, cell.h + 0.6);
-        }
-      } else {
-        ctx.rect(cell.x, cell.y, cell.w + 0.6, cell.h + 0.6);
-      }
-    }
-    ctx.clip();
-    const alpha = anim.fillReveal === "fade" ? clamp(fillP * 1.4, 0, 1) : 1;
-    ctx.globalAlpha *= alpha;
-    if (style === "illust") ctx.filter = "contrast(1.15) saturate(0.85)";
-    ctx.drawImage(bitmap, 0, 0, layer.width, layer.height);
-    ctx.restore();
-  }
-
   if (p >= 1) {
     ctx.drawImage(bitmap, 0, 0, layer.width, layer.height);
     return null;
   }
-  const idx = order[Math.min(n - 1, Math.max(0, style === "reveal" ? fillCount : sketchCount))]!;
-  const cell = cells[idx]!;
-  return { x: cell.cx, y: cell.cy, style: anim.hand };
+  const tip = colorReveal(ctx, bitmap, layer.width, layer.height, Math.max(p, 0.04), anim.style, seed);
+  return { x: tip.x, y: tip.y, style: anim.hand };
 }
 
 function drawCaption(
@@ -1088,11 +1112,11 @@ function drawCaption(
 ) {
   const theme = captionTheme(bg);
   ctx.save();
-  ctx.font = "600 22px Source Sans 3, sans-serif";
-  const margin = 36;
-  const padX = 20;
-  const padY = 12;
-  const lineH = 28;
+  ctx.font = "700 32px Caveat, cursive";
+  const margin = 28;
+  const padX = 22;
+  const padY = 14;
+  const lineH = 38;
   const maxText = Math.max(80, width - margin * 2 - padX * 2);
   const shown = text.slice(0, Math.max(0, Math.floor(clamp(p, 0, 1) * text.length)));
   const fullLines = wrapCaptionLines(ctx, text, maxText);
@@ -1101,9 +1125,12 @@ function drawCaption(
   const boxW = Math.min(width - margin * 2, textW + padX * 2);
   const boxH = fullLines.length * lineH + padY * 2;
   const boxX = (width - boxW) / 2;
-  const boxY = Math.max(margin, height - boxH - 28);
+  const boxY = Math.max(margin, height - boxH - 22);
   ctx.fillStyle = theme.fill;
-  roundFill(ctx, boxX, boxY, boxW, boxH, 12);
+  roundFill(ctx, boxX, boxY, boxW, boxH, 14);
+  ctx.strokeStyle = "rgba(28,25,22,0.12)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
   ctx.fillStyle = theme.text;
   ctx.textBaseline = "middle";
   ctx.textAlign = "center";
