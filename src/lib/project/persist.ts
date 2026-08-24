@@ -1,5 +1,5 @@
-import type { Project, ProjectMeta } from "./types";
-import { resolveAnim } from "./types";
+import type { Layer, Project, ProjectMeta } from "./types";
+import { canvasSize, resolveAnim } from "./types";
 import { projectDuration } from "./factory";
 
 const DB_NAME = "chalkline-db";
@@ -43,17 +43,87 @@ export function normalizeProject(raw: Project): Project {
   p.musicVolume = typeof p.musicVolume === "number" ? p.musicVolume : 0.4;
   p.notes = p.notes ?? "";
   p.solidColor = p.solidColor ?? "#F4EFE6";
+  const { width, height } = canvasSize(p);
+  const hasMusic = Boolean(p.musicSrc);
   for (const scene of p.scenes ?? []) {
     scene.transition = scene.transition ?? "cut";
     scene.hold = typeof scene.hold === "number" ? scene.hold : 0.45;
+    if (hasMusic) scene.hold = Math.min(scene.hold, 0.12);
     scene.captions = scene.captions ?? [];
-    scene.layers = (scene.layers ?? []).map((layer) => ({
-      ...layer,
-      locked: Boolean(layer.locked),
-      anim: resolveAnim(layer.anim),
-    }));
+    scene.layers = (scene.layers ?? []).map((layer) => {
+      const anim = resolveAnim(layer.anim);
+      anim.speed = Math.min(anim.speed ?? 1, 1);
+      if (layer.type === "image" && layer.image?.filter === "sketch") {
+        layer.image.filter = "none";
+      }
+      if (layer.type === "text" && layer.text) {
+        if (anim.textAnim === "fade") anim.textAnim = "typewriter";
+      }
+      const next: Layer = { ...layer, locked: Boolean(layer.locked), anim };
+      clampLayerToBoard(next, width, height);
+      return next;
+    });
+    const layerEnd = Math.max(0, ...scene.layers.map((l) => l.start + l.duration));
+    for (const cap of scene.captions) {
+      if (cap.end > layerEnd + 0.4) cap.end = layerEnd + 0.25;
+      if (cap.start < 0) cap.start = 0;
+    }
   }
   return p;
+}
+
+function clampLayerToBoard(layer: Layer, width: number, height: number) {
+  const pad = 12;
+  layer.width = Math.max(24, Math.min(layer.width, width - pad * 2));
+  layer.height = Math.max(layer.type === "arrow" ? 8 : 24, Math.min(layer.height, height - pad * 2));
+  layer.x = Math.max(pad, Math.min(layer.x, width - layer.width - pad));
+  layer.y = Math.max(pad, Math.min(layer.y, height - layer.height - pad));
+}
+
+export function scaleTimeline(project: Project, target: number) {
+  const cur = projectDuration(project);
+  if (cur < 0.5 || target < 0.5) return;
+  if (Math.abs(cur - target) / target < 0.04) return;
+  const k = target / cur;
+  for (const scene of project.scenes) {
+    scene.hold = Math.max(0, scene.hold * k);
+    for (const layer of scene.layers) {
+      layer.start *= k;
+      layer.duration *= k;
+    }
+    for (const cap of scene.captions) {
+      cap.start *= k;
+      cap.end *= k;
+    }
+  }
+}
+
+export function probeAudioDuration(src: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    if (typeof Audio === "undefined") {
+      resolve(null);
+      return;
+    }
+    const a = new Audio();
+    let settled = false;
+    const done = (v: number | null) => {
+      if (settled) return;
+      settled = true;
+      a.removeAttribute("src");
+      resolve(v);
+    };
+    a.preload = "metadata";
+    a.onloadedmetadata = () => done(Number.isFinite(a.duration) && a.duration > 0 ? a.duration : null);
+    a.onerror = () => done(null);
+    window.setTimeout(() => done(null), 5000);
+    a.src = src;
+  });
+}
+
+export async function fitProjectToMusic(project: Project) {
+  if (!project.musicSrc) return;
+  const duration = await probeAudioDuration(project.musicSrc);
+  if (duration) scaleTimeline(project, duration);
 }
 
 export async function saveProject(project: Project, thumb?: string) {

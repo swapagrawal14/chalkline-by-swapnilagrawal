@@ -61,7 +61,7 @@ async function prepareLayer(layer: Layer): Promise<PreparedLayer> {
       layer.image.src,
       layer.width,
       layer.height,
-      layer.image.filter,
+      layer.image.filter === "sketch" ? "none" : layer.image.filter,
     );
     const cols = Math.max(6, Math.round(layer.width / 36));
     const rows = Math.max(6, Math.round(layer.height / 36));
@@ -156,6 +156,36 @@ export function localTime(prepared: PreparedProject, time: number) {
   return { sceneIndex: prepared.scenes.length - 1, local: last.duration, scene: last };
 }
 
+function layerFocus(layer: Layer, local: number, width: number, height: number) {
+  const raw = clamp((local - layer.start) / Math.max(0.001, layer.duration), 0, 1);
+  const p = easeInOut(raw);
+  if (layer.type === "text") {
+    const align = layer.text?.align ?? "left";
+    const along = align === "center" ? 0.5 : align === "right" ? 0.72 : 0.22 + 0.45 * p;
+    return {
+      cx: layer.x + layer.width * along,
+      cy: layer.y + layer.height / 2,
+      scale: 1.14,
+    };
+  }
+  return {
+    cx: layer.x + layer.width / 2,
+    cy: layer.y + layer.height / 2,
+    scale: clamp(Math.min(width / (layer.width + 120), height / (layer.height + 140)), 1.04, 1.22),
+  };
+}
+
+function clampCam(cx: number, cy: number, scale: number, width: number, height: number) {
+  const s = clamp(scale, 1, 1.28);
+  const hw = width / (2 * s);
+  const hh = height / (2 * s);
+  return {
+    cx: clamp(cx, hw, width - hw),
+    cy: clamp(cy, hh, height - hh),
+    scale: s,
+  };
+}
+
 function computeScribeCam(scene: PreparedScene, local: number, width: number, height: number) {
   const layers = scene.layers.map((p) => p.layer).filter((l) => l.visible);
   const fallback = { cx: width / 2, cy: height / 2, scale: 1 };
@@ -170,7 +200,7 @@ function computeScribeCam(scene: PreparedScene, local: number, width: number, he
     if (local < end) {
       previous = current;
       current = layer;
-      blend = clamp((local - layer.start) / 0.32, 0, 1);
+      blend = clamp((local - layer.start) / 0.42, 0, 1);
       break;
     }
     previous = current;
@@ -179,29 +209,21 @@ function computeScribeCam(scene: PreparedScene, local: number, width: number, he
   }
   if (!current) current = layers[0]!;
 
-  const from = previous ?? current;
-  const to = current;
+  const from = layerFocus(previous ?? current, local, width, height);
+  const to = layerFocus(current, local, width, height);
   const e = easeInOut(blend);
-  const cx = lerp(from.x + from.width / 2, to.x + to.width / 2, e);
-  const cy = lerp(from.y + from.height / 2, to.y + to.height / 2, e);
-  const fit = (layer: Layer) => {
-    const fw = Math.max(layer.width, 180) * 2.05;
-    const fh = Math.max(layer.height, 160) * 2.15;
-    return clamp(Math.min(width / fw, height / fh), 1.08, 1.72);
-  };
-  let scale = lerp(fit(from), fit(to), e);
+  let cx = lerp(from.cx, to.cx, e);
+  let cy = lerp(from.cy, to.cy, e);
+  let scale = lerp(from.scale, to.scale, e);
 
   const lastEnd = Math.max(...layers.map((l) => l.start + l.duration));
   if (local > lastEnd) {
     const k = easeInOut(clamp((local - lastEnd) / 0.55, 0, 1));
     scale = lerp(scale, 1, k);
-    return {
-      cx: lerp(cx, width / 2, k),
-      cy: lerp(cy, height / 2, k),
-      scale,
-    };
+    cx = lerp(cx, width / 2, k);
+    cy = lerp(cy, height / 2, k);
   }
-  return { cx, cy, scale };
+  return clampCam(cx, cy, scale, width, height);
 }
 
 export function renderFrame(
@@ -226,6 +248,9 @@ export function renderFrame(
     ctx.translate(width / 2, height / 2);
     ctx.scale(cam.scale, cam.scale);
     ctx.translate(-cam.cx, -cam.cy);
+    ctx.beginPath();
+    ctx.rect(0, 0, width, height);
+    ctx.clip();
   } else if (scene.scene.camera.enabled && mode === "play") {
     const p = easeInOut(clamp(local / Math.max(0.001, scene.duration), 0, 1));
     const cam = scene.scene.camera;
@@ -265,7 +290,7 @@ export function renderFrame(
       })
       .map((prep) => prep.layer.id),
   );
-  const spotlight = Boolean(project.spotlight) && mode === "play" && drawingIds.size > 0;
+  const spotlight = Boolean(project.spotlight) && !useScribe && mode === "play" && drawingIds.size > 0;
 
   for (const prep of scene.layers) {
     const layer = prep.layer;
@@ -642,23 +667,61 @@ function drawText(
   }
 
   const totalChars = Math.max(1, t.text.replace(/\n/g, "").length);
-  const shown = Math.floor(p * totalChars);
+  const shown = Math.max(1, Math.floor(p * totalChars));
+  ctx.textAlign = "left";
   let count = 0;
   lines.forEach((line, i) => {
     const y = layer.height / 2 - ((lines.length - 1) * lh) / 2 + i * lh;
+    const fullW = ctx.measureText(line).width;
+    let x = ax;
+    if (t.align === "center") x = ax - fullW / 2;
+    if (t.align === "right") x = ax - fullW;
     let visible = "";
     for (const ch of line) {
-      if (count < shown) {
-        visible += ch;
-        count++;
-      }
+      if (count >= shown) break;
+      visible += ch;
+      count++;
     }
-    ctx.fillText(visible, ax, y);
-    lastX = ax + (t.align === "center" ? ctx.measureText(visible).width / 2 : ctx.measureText(visible).width);
-    lastY = y;
+    const visW = ctx.measureText(visible).width;
+    if (visW > 2) {
+      ctx.save();
+      ctx.fillStyle = "rgba(255, 214, 74, 0.38)";
+      ctx.fillRect(x - 6, y - size * 0.48, visW + 12, size * 0.98);
+      ctx.restore();
+    }
+    let cx = x;
+    count -= visible.length;
+    for (const ch of visible) {
+      const appear = count / totalChars;
+      count++;
+      const localP = clamp((p - appear) / 0.16, 0, 1);
+      const wobble = (1 - localP) * 0.18;
+      ctx.save();
+      ctx.translate(cx, y);
+      ctx.rotate((-8 + (count % 5) * 3) * (Math.PI / 180) * wobble);
+      ctx.scale(1, 0.86 + 0.14 * localP);
+      ctx.fillStyle = t.color;
+      ctx.fillText(ch, 0, 0);
+      ctx.restore();
+      cx += ctx.measureText(ch).width;
+      lastX = cx;
+      lastY = y;
+    }
+    if (visW > 4) {
+      ctx.save();
+      ctx.strokeStyle = t.color;
+      ctx.globalAlpha = 0.55;
+      ctx.lineWidth = Math.max(2.2, size * 0.07);
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(x, y + size * 0.42);
+      ctx.quadraticCurveTo(x + visW * 0.5, y + size * 0.5, x + visW, y + size * 0.4);
+      ctx.stroke();
+      ctx.restore();
+    }
   });
   if (p >= 1) return null;
-  return { x: lastX, y: lastY + 8, style: layer.anim.hand };
+  return { x: lastX, y: lastY + 10, style: layer.anim.hand };
 }
 
 function drawPaths(
@@ -791,25 +854,25 @@ function applyStrokeStyle(
 }
 
 function drawScribblePath(ctx: CanvasRenderingContext2D, w: number, h: number, p: number) {
-  const rows = 8;
-  const cols = 6;
-  const total = rows * cols;
-  const shown = Math.max(1, total * clamp(p, 0.02, 1));
+  const rows = Math.max(8, Math.round(h / 42));
+  const shown = clamp(p, 0.02, 1) * rows;
   ctx.beginPath();
-  let prevX = 0;
-  let prevY = h * 0.08;
-  for (let i = 0; i <= shown; i++) {
-    const row = Math.floor(i / cols);
-    const colIn = i % cols;
-    const col = row % 2 === 0 ? colIn : cols - 1 - colIn;
-    const x = ((col + 0.5) / cols) * w + Math.sin(i * 1.71) * w * 0.045;
-    const y = ((row + 0.5) / rows) * h + Math.cos(i * 1.33) * h * 0.04;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.quadraticCurveTo(prevX, prevY, (prevX + x) / 2, (prevY + y) / 2);
-    prevX = x;
-    prevY = y;
+  let x = 0;
+  let y = h * 0.05;
+  const whole = Math.floor(shown);
+  for (let row = 0; row <= whole && row < rows; row++) {
+    const even = row % 2 === 0;
+    y = ((row + 0.5) / rows) * h;
+    const x0 = even ? -w * 0.06 : w * 1.06;
+    const x1 = even ? w * 1.06 : -w * 0.06;
+    const frac = row < whole ? 1 : shown - whole;
+    const xEnd = x0 + (x1 - x0) * frac;
+    ctx.moveTo(x0, y);
+    const mid = (x0 + xEnd) / 2;
+    ctx.quadraticCurveTo(mid, y + (even ? 1 : -1) * Math.min(8, h * 0.012), xEnd, y);
+    x = xEnd;
   }
-  return { x: prevX, y: prevY };
+  return { x: clamp(x, 0, w), y: clamp(y, 0, h) };
 }
 
 let maskCanvas: HTMLCanvasElement | null = null;
@@ -837,7 +900,7 @@ function scribbleReveal(
   t.strokeStyle = "#fff";
   t.lineCap = "round";
   t.lineJoin = "round";
-  t.lineWidth = Math.max(mw, mh) * 0.3;
+  t.lineWidth = Math.max(18, mh / Math.max(8, Math.round(mh / 42))) * 1.7;
   const tip = drawScribblePath(t, mw, mh, p);
   t.stroke();
   t.globalCompositeOperation = "source-in";
@@ -858,40 +921,12 @@ function drawImageLayer(
   const scribbleOn =
     anim.style === "scribble" || anim.style === "scanner" || anim.style === "zigzag" || anim.style === "contour";
   if (scribbleOn) {
-    const sketchUntil = anim.drawStyle === "reveal" ? 0 : 0.42;
-    if (anim.drawStyle !== "reveal" && p < 1) {
-      const cells = prep.cells!;
-      const order = prep.order!;
-      const n = order.length;
-      const sketchCount = Math.floor(clamp(p / Math.max(0.001, sketchUntil), 0, 1) * n);
-      ctx.save();
-      ctx.strokeStyle = anim.color;
-      ctx.lineCap = "round";
-      applyStrokeStyle(ctx, anim.strokeStyle, anim.strokeWidth);
-      const jitter = anim.sketchiness * 2.2;
-      for (let i = 0; i < sketchCount; i++) {
-        const cell = cells[order[i]!]!;
-        for (const s of cell.strokes) {
-          const j = ((i * 17) % 5) - 2;
-          ctx.beginPath();
-          ctx.moveTo(s.x1 + j * jitter * 0.15, s.y1);
-          ctx.lineTo(s.x2 + j * jitter * 0.1, s.y2 + j * 0.2);
-          ctx.stroke();
-        }
-      }
-      ctx.restore();
-    }
-    const fillP = anim.drawStyle === "outline" ? 0 : clamp((p - sketchUntil) / Math.max(0.001, 1 - sketchUntil), 0, 1);
-    if (fillP > 0) {
-      const tip = scribbleReveal(ctx, bitmap, layer.width, layer.height, Math.max(fillP, 0.04));
-      if (p >= 1) return null;
-      return { x: tip.x, y: tip.y, style: anim.hand };
-    }
+    const tip = scribbleReveal(ctx, bitmap, layer.width, layer.height, Math.max(p, 0.04));
     if (p >= 1) {
       ctx.drawImage(bitmap, 0, 0, layer.width, layer.height);
       return null;
     }
-    return { x: layer.width * p, y: layer.height * 0.45, style: anim.hand };
+    return { x: tip.x, y: tip.y, style: anim.hand };
   }
   const cells = prep.cells!;
   const order = anim.reverse ? [...prep.order!].reverse() : prep.order!;

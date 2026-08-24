@@ -18,6 +18,7 @@ import {
   normalizeProject,
   saveProject,
   toMeta,
+  fitProjectToMusic,
 } from "./persist";
 import { STARTER_TEMPLATES } from "./samples";
 import { BOARD_LOOKS, MOTION_PRESETS } from "./presets";
@@ -190,6 +191,7 @@ export const useStudio = create<StudioState>((set, get) => ({
       set({ project: null, prepared: null, preparing: false, missing: true });
       return;
     }
+    if (project.musicSrc) await fitProjectToMusic(project);
     set({
       project,
       selectedId: null,
@@ -836,6 +838,7 @@ export const useStudio = create<StudioState>((set, get) => ({
       data.id = uid("pr");
       data.createdAt = Date.now();
       data.updatedAt = Date.now();
+      if (data.musicSrc) await fitProjectToMusic(data);
       await saveProject(data);
       await get().refreshMetas();
       return data.id;

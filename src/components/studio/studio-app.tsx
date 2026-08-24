@@ -1831,20 +1831,28 @@ function ExportOverlay() {
 
 function MusicSync() {
   const project = useStudio((s) => s.project);
-  const playing = useStudio((s) => s.playing);
   const ref = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
     const el = ref.current;
     if (!el || !project?.musicSrc) return;
     el.volume = project.musicVolume;
-    if (playing) {
-      el.currentTime = useStudio.getState().time;
-      void el.play().catch(() => {});
-    } else {
-      el.pause();
-    }
-  }, [playing, project?.musicSrc, project?.musicVolume]);
+    let raf = 0;
+    const sync = () => {
+      const { playing, time, playSpeed } = useStudio.getState();
+      el.playbackRate = playSpeed || 1;
+      if (playing) {
+        if (el.paused) void el.play().catch(() => {});
+        if (Math.abs(el.currentTime - time) > 0.18) el.currentTime = Math.max(0, time);
+      } else if (!el.paused) {
+        el.pause();
+        if (Math.abs(el.currentTime - time) > 0.05) el.currentTime = Math.max(0, time);
+      }
+      raf = requestAnimationFrame(sync);
+    };
+    raf = requestAnimationFrame(sync);
+    return () => cancelAnimationFrame(raf);
+  }, [project?.musicSrc, project?.musicVolume]);
 
   if (!project?.musicSrc) return null;
   return <audio ref={ref} src={project.musicSrc} />;

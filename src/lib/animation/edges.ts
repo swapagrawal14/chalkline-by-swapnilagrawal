@@ -24,9 +24,8 @@ export function rasterizeImage(
       const canvas = document.createElement("canvas");
       canvas.width = Math.max(2, Math.round(width));
       canvas.height = Math.max(2, Math.round(height));
-      const ctx = canvas.getContext("2d")!;
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
       const dw = img.width * scale;
       const dh = img.height * scale;
@@ -53,34 +52,99 @@ function applyFilter(
       px[i + 1] = Math.round(px[i + 1]! / 48) * 48;
       px[i + 2] = Math.round(px[i + 2]! / 48) * 48;
     }
-  } else if (filter === "ink") {
-    for (let i = 0; i < px.length; i += 4) {
-      const l = 0.3 * px[i]! + 0.59 * px[i + 1]! + 0.11 * px[i + 2]!;
-      const v = l < 140 ? 30 : 245;
-      px[i] = px[i + 1] = px[i + 2] = v;
+    ctx.putImageData(data, 0, 0);
+    return;
+  }
+
+  const n = w * h;
+  const lum = new Float32Array(n);
+  let mean = 0;
+  for (let i = 0, p = 0; i < n; i++, p += 4) {
+    const L = 0.3 * px[p]! + 0.59 * px[p + 1]! + 0.11 * px[p + 2]!;
+    lum[i] = L;
+    mean += L;
+  }
+  mean /= n;
+  const invert = mean < 92;
+  if (invert) {
+    for (let i = 0; i < n; i++) lum[i] = 255 - lum[i]!;
+  }
+
+  const blur = new Float32Array(n);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      blur[i] =
+        (lum[i - w - 1]! +
+          lum[i - w]! +
+          lum[i - w + 1]! +
+          lum[i - 1]! +
+          lum[i]! +
+          lum[i + 1]! +
+          lum[i + w - 1]! +
+          lum[i + w]! +
+          lum[i + w + 1]!) /
+        9;
     }
-  } else {
-    const copy = new Uint8ClampedArray(px);
-    const idx = (x: number, y: number) => (y * w + x) * 4;
-    for (let y = 1; y < h - 1; y++) {
-      for (let x = 1; x < w - 1; x++) {
-        let gx = 0;
-        let gy = 0;
-        for (let ky = -1; ky <= 1; ky++) {
-          for (let kx = -1; kx <= 1; kx++) {
-            const i = idx(x + kx, y + ky);
-            const l = 0.3 * copy[i]! + 0.59 * copy[i + 1]! + 0.11 * copy[i + 2]!;
-            const sx = kx === 0 ? 0 : kx;
-            const sy = ky === 0 ? 0 : ky;
-            gx += l * sx;
-            gy += l * sy;
-          }
-        }
-        const mag = Math.min(255, Math.hypot(gx, gy) * 0.6);
-        const i = idx(x, y);
-        const v = 255 - mag;
-        px[i] = px[i + 1] = px[i + 2] = v;
+  }
+
+  const mag = new Float32Array(n);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const gx =
+        -blur[i - w - 1]! +
+        blur[i - w + 1]! -
+        2 * blur[i - 1]! +
+        2 * blur[i + 1]! -
+        blur[i + w - 1]! +
+        blur[i + w + 1]!;
+      const gy =
+        -blur[i - w - 1]! -
+        2 * blur[i - w]! -
+        blur[i - w + 1]! +
+        blur[i + w - 1]! +
+        2 * blur[i + w]! +
+        blur[i + w + 1]!;
+      mag[i] = Math.hypot(gx, gy);
+    }
+  }
+
+  const outlinesOnly = filter === "ink";
+  const edgeT = outlinesOnly ? 38 : 26;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const p = i * 4;
+      const L = blur[i] || lum[i]!;
+      const m = mag[i]!;
+      const edge = m > edgeT;
+      const paper = L > 232 && m < 14;
+      if (paper || x === 0 || y === 0 || x === w - 1 || y === h - 1) {
+        px[p] = 255;
+        px[p + 1] = 255;
+        px[p + 2] = 255;
+        px[p + 3] = 0;
+        continue;
       }
+      if (edge) {
+        const ink = Math.max(18, 48 - (m - edgeT) * 0.4);
+        px[p] = ink;
+        px[p + 1] = ink * 0.92;
+        px[p + 2] = ink * 0.82;
+        px[p + 3] = 255;
+        continue;
+      }
+      if (outlinesOnly || L > 188) {
+        px[p + 3] = 0;
+        continue;
+      }
+      // Flat marker wash from the original colour so masses still read, without photo shading.
+      const wash = 0.38;
+      px[p] = Math.round(px[p]! * wash + 28 * (1 - wash));
+      px[p + 1] = Math.round(px[p + 1]! * wash + 25 * (1 - wash));
+      px[p + 2] = Math.round(px[p + 2]! * wash + 22 * (1 - wash));
+      px[p + 3] = L < 70 ? 200 : 110;
     }
   }
   ctx.putImageData(data, 0, 0);
@@ -119,7 +183,7 @@ export function buildCells(canvas: HTMLCanvasElement, cols: number, rows: number
           if (diff > 18 || l < 90) {
             edge += diff;
             const jitter = (Math.random() - 0.5) * 3;
-            const len = 6 + Math.random() * 10;
+            const len = 11 + Math.random() * 16;
             const ang = diff > 18 ? Math.atan2(0, 1) + jitter * 0.2 : Math.random() * Math.PI;
             strokes.push({
               x1: x + px + jitter,
@@ -175,7 +239,6 @@ export function orderCells(cells: Cell[], style: AnimationStyle, cols: number, r
     case "wipe-right":
       return by((i) => colOf(i) * 1000 + rowOf(i));
     case "zigzag":
-    case "scribble":
       return idx.sort((a, b) => {
         const ra = rowOf(a);
         const rb = rowOf(b);
@@ -197,6 +260,7 @@ export function orderCells(cells: Cell[], style: AnimationStyle, cols: number, r
         return -(Math.hypot(dx, dy) * 1000) + Math.atan2(dy, dx);
       });
     case "edges-first":
+    case "scribble":
       return idx.sort((a, b) => cells[b]!.edge - cells[a]!.edge);
     case "chunks":
     case "scatter":
