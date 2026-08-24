@@ -800,20 +800,65 @@ function drawCaption(
   p = 1,
 ) {
   const theme = captionTheme(bg);
-  const shown = text.slice(0, Math.max(1, Math.floor(clamp(p, 0, 1) * text.length)));
   ctx.save();
   ctx.font = "600 22px Source Sans 3, sans-serif";
-  const padX = 18;
-  const w = ctx.measureText(text).width;
-  const x = (width - w) / 2;
-  const y = height - 48;
+  const margin = 36;
+  const padX = 20;
+  const padY = 12;
+  const lineH = 28;
+  const maxText = Math.max(80, width - margin * 2 - padX * 2);
+  const shown = text.slice(0, Math.max(0, Math.floor(clamp(p, 0, 1) * text.length)));
+  const fullLines = wrapCaptionLines(ctx, text, maxText);
+  const shownLines = wrapCaptionLines(ctx, shown || " ", maxText);
+  const textW = Math.max(...fullLines.map((line) => ctx.measureText(line).width), 0);
+  const boxW = Math.min(width - margin * 2, textW + padX * 2);
+  const boxH = fullLines.length * lineH + padY * 2;
+  const boxX = (width - boxW) / 2;
+  const boxY = Math.max(margin, height - boxH - 28);
   ctx.fillStyle = theme.fill;
-  roundFill(ctx, x - padX, y - 20, w + padX * 2, 36, 10);
+  roundFill(ctx, boxX, boxY, boxW, boxH, 12);
   ctx.fillStyle = theme.text;
   ctx.textBaseline = "middle";
-  ctx.textAlign = "left";
-  ctx.fillText(shown, x, y - 2);
+  ctx.textAlign = "center";
+  shownLines.forEach((line, i) => {
+    ctx.fillText(line, width / 2, boxY + padY + lineH * i + lineH / 2);
+  });
   ctx.restore();
+}
+
+function wrapCaptionLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  const words = text.split(/\s+/).filter((w) => w.length > 0);
+  if (words.length === 0) return [""];
+  const packed: string[] = [];
+  let current = words[0]!;
+  for (let i = 1; i < words.length; i++) {
+    const trial = `${current} ${words[i]!}`;
+    if (ctx.measureText(trial).width <= maxWidth) current = trial;
+    else {
+      packed.push(current);
+      current = words[i]!;
+    }
+  }
+  packed.push(current);
+  const lines: string[] = [];
+  for (const line of packed) {
+    if (ctx.measureText(line).width <= maxWidth) {
+      lines.push(line);
+      continue;
+    }
+    let chunk = "";
+    for (const ch of line) {
+      const next = chunk + ch;
+      if (chunk && ctx.measureText(next).width > maxWidth) {
+        lines.push(chunk);
+        chunk = ch;
+      } else {
+        chunk = next;
+      }
+    }
+    if (chunk) lines.push(chunk);
+  }
+  return lines;
 }
 
 function roundFill(
@@ -824,12 +869,17 @@ function roundFill(
   h: number,
   r: number,
 ) {
+  const radius = Math.max(0, Math.min(r, w / 2, h / 2));
   ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
+  if (typeof ctx.roundRect === "function") {
+    ctx.roundRect(x, y, w, h, radius);
+  } else {
+    ctx.moveTo(x + radius, y);
+    ctx.arcTo(x + w, y, x + w, y + h, radius);
+    ctx.arcTo(x + w, y + h, x, y + h, radius);
+    ctx.arcTo(x, y + h, x, y, radius);
+    ctx.arcTo(x, y, x + w, y, radius);
+    ctx.closePath();
+  }
   ctx.fill();
 }
