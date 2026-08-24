@@ -156,22 +156,41 @@ export function localTime(prepared: PreparedProject, time: number) {
   return { sceneIndex: prepared.scenes.length - 1, local: last.duration, scene: last };
 }
 
-function layerFocus(layer: Layer, local: number, width: number, height: number) {
+function sceneSeed(index: number) {
+  return {
+    cam: index % 5,
+    scribble: index % 4,
+    text: index % 3,
+    highlight:
+      index % 3 === 0
+        ? "rgba(255, 214, 74, 0.38)"
+        : index % 3 === 1
+          ? "rgba(255, 138, 92, 0.32)"
+          : "rgba(92, 196, 176, 0.34)",
+  };
+}
+
+function layerFocus(layer: Layer, local: number, width: number, height: number, cam = 0) {
   const raw = clamp((local - layer.start) / Math.max(0.001, layer.duration), 0, 1);
   const p = easeInOut(raw);
+  const punch = cam === 2 ? 1.22 : cam === 1 ? 1.05 : cam === 4 ? 1.18 : 1.12;
   if (layer.type === "text") {
     const align = layer.text?.align ?? "left";
-    const along = align === "center" ? 0.5 : align === "right" ? 0.72 : 0.22 + 0.45 * p;
+    let along = align === "center" ? 0.5 : align === "right" ? 0.72 : 0.22 + 0.45 * p;
+    if (cam === 3) along = align === "right" ? 0.35 : 0.18;
+    if (cam === 1) along = 0.5;
     return {
       cx: layer.x + layer.width * along,
-      cy: layer.y + layer.height / 2,
-      scale: 1.14,
+      cy: layer.y + layer.height / 2 + (cam === 4 ? 28 : 0),
+      scale: cam === 1 ? 1.04 : punch,
     };
   }
+  const biasX = cam === 3 ? -layer.width * 0.12 : cam === 4 ? layer.width * 0.06 : 0;
+  const biasY = cam === 4 ? layer.height * 0.08 : 0;
   return {
-    cx: layer.x + layer.width / 2,
-    cy: layer.y + layer.height / 2,
-    scale: clamp(Math.min(width / (layer.width + 120), height / (layer.height + 140)), 1.04, 1.22),
+    cx: layer.x + layer.width / 2 + biasX,
+    cy: layer.y + layer.height / 2 + biasY,
+    scale: clamp(Math.min(width / (layer.width + 120), height / (layer.height + 140)) * (cam === 2 ? 1.08 : 1), cam === 1 ? 1.02 : 1.04, cam === 2 ? 1.26 : 1.2),
   };
 }
 
@@ -186,10 +205,11 @@ function clampCam(cx: number, cy: number, scale: number, width: number, height: 
   };
 }
 
-function computeScribeCam(scene: PreparedScene, local: number, width: number, height: number) {
+function computeScribeCam(scene: PreparedScene, local: number, width: number, height: number, sceneIndex = 0) {
   const layers = scene.layers.map((p) => p.layer).filter((l) => l.visible);
   const fallback = { cx: width / 2, cy: height / 2, scale: 1 };
   if (!layers.length) return fallback;
+  const cam = sceneSeed(sceneIndex).cam;
 
   let current: Layer | null = null;
   let previous: Layer | null = null;
@@ -200,7 +220,7 @@ function computeScribeCam(scene: PreparedScene, local: number, width: number, he
     if (local < end) {
       previous = current;
       current = layer;
-      blend = clamp((local - layer.start) / 0.42, 0, 1);
+      blend = clamp((local - layer.start) / (cam === 1 ? 0.22 : 0.42), 0, 1);
       break;
     }
     previous = current;
@@ -209,19 +229,25 @@ function computeScribeCam(scene: PreparedScene, local: number, width: number, he
   }
   if (!current) current = layers[0]!;
 
-  const from = layerFocus(previous ?? current, local, width, height);
-  const to = layerFocus(current, local, width, height);
+  const from = layerFocus(previous ?? current, local, width, height, cam);
+  const to = layerFocus(current, local, width, height, cam);
   const e = easeInOut(blend);
   let cx = lerp(from.cx, to.cx, e);
   let cy = lerp(from.cy, to.cy, e);
   let scale = lerp(from.scale, to.scale, e);
 
   const lastEnd = Math.max(...layers.map((l) => l.start + l.duration));
-  if (local > lastEnd) {
-    const k = easeInOut(clamp((local - lastEnd) / 0.55, 0, 1));
-    scale = lerp(scale, 1, k);
-    cx = lerp(cx, width / 2, k);
-    cy = lerp(cy, height / 2, k);
+  if (local > lastEnd || cam === 1) {
+    const k = cam === 1 ? 1 : easeInOut(clamp((local - lastEnd) / 0.55, 0, 1));
+    if (cam === 1) {
+      scale = 1.04;
+      cx = width / 2;
+      cy = height / 2;
+    } else if (local > lastEnd) {
+      scale = lerp(scale, 1, k);
+      cx = lerp(cx, width / 2, k);
+      cy = lerp(cy, height / 2, k);
+    }
   }
   return clampCam(cx, cy, scale, width, height);
 }
@@ -238,13 +264,14 @@ export function renderFrame(
   ctx.clearRect(0, 0, width, height);
   paintBackground(ctx, width, height, project);
 
-  const { scene, local } = localTime(prepared, time);
+  const { scene, local, sceneIndex } = localTime(prepared, time);
   const transition = scene.scene.transition ?? "cut";
   const fadeFor = 0.45;
   const useScribe = mode === "play" && project.scribe !== false;
+  const seed = sceneSeed(sceneIndex);
 
   if (useScribe) {
-    const cam = computeScribeCam(scene, local, width, height);
+    const cam = computeScribeCam(scene, local, width, height, sceneIndex);
     ctx.translate(width / 2, height / 2);
     ctx.scale(cam.scale, cam.scale);
     ctx.translate(-cam.cx, -cam.cy);
@@ -296,7 +323,7 @@ export function renderFrame(
     const layer = prep.layer;
     if (!layer.visible) continue;
     if (mode === "edit") {
-      drawLayerComplete(ctx, prep, local);
+      drawLayerComplete(ctx, prep, local, seed);
       if (selectedIds.includes(layer.id)) drawSelection(ctx, layer);
       continue;
     }
@@ -306,14 +333,14 @@ export function renderFrame(
     if (local >= end) {
       ctx.save();
       if (spotlight) ctx.globalAlpha *= 0.38;
-      drawLayerComplete(ctx, prep, local);
+      drawLayerComplete(ctx, prep, local, seed);
       ctx.restore();
       continue;
     }
     const anim = resolveAnim(layer.anim);
     const raw = (local - start) / Math.max(0.001, layer.duration);
     const p = easeBy(anim.easing, clamp(raw * Math.max(0.25, anim.speed), 0, 1));
-    const h = drawLayerPartial(ctx, prep, p, local);
+    const h = drawLayerPartial(ctx, prep, p, local, seed);
     if (h) {
       const lift = p < 0.1 ? 1 - p / 0.1 : p > 0.9 ? (p - 0.9) / 0.1 : 0;
       hand = { ...h, dust: anim.dust, lift };
@@ -509,8 +536,8 @@ function drawDust(ctx: CanvasRenderingContext2D, x: number, y: number, t: number
   ctx.restore();
 }
 
-function drawLayerComplete(ctx: CanvasRenderingContext2D, prep: PreparedLayer, local = 0) {
-  drawLayerPartial(ctx, prep, 1, local);
+function drawLayerComplete(ctx: CanvasRenderingContext2D, prep: PreparedLayer, local = 0, seed = sceneSeed(0)) {
+  drawLayerPartial(ctx, prep, 1, local, seed);
 }
 
 function drawLayerPartial(
@@ -518,6 +545,7 @@ function drawLayerPartial(
   prep: PreparedLayer,
   p: number,
   local = 0,
+  seed = sceneSeed(0),
 ): { x: number; y: number; style: Layer["anim"]["hand"] } | null {
   const layer = prep.layer;
   const anim = resolveAnim(layer.anim);
@@ -540,11 +568,11 @@ function drawLayerPartial(
   let hand: { x: number; y: number; style: Layer["anim"]["hand"] } | null = null;
 
   if (layer.type === "text" && layer.text) {
-    hand = drawText(ctx, layer, p);
+    hand = drawText(ctx, layer, p, seed);
   } else if (layer.type === "icon" || layer.type === "shape" || layer.type === "arrow") {
     hand = drawPaths(ctx, prep, p);
   } else if (layer.type === "image" && prep.bitmap && prep.cells && prep.order) {
-    hand = drawImageLayer(ctx, prep, p);
+    hand = drawImageLayer(ctx, prep, p, seed);
   }
 
   ctx.restore();
@@ -580,6 +608,7 @@ function drawText(
   ctx: CanvasRenderingContext2D,
   layer: Layer,
   p: number,
+  seed = sceneSeed(0),
 ): { x: number; y: number; style: Layer["anim"]["hand"] } | null {
   const t = layer.text!;
   const anim = resolveAnim(layer.anim);
@@ -596,7 +625,10 @@ function drawText(
   let lastX = ax;
   let lastY = layer.height / 2;
 
-  const mode = anim.textAnim;
+  let mode = anim.textAnim;
+  if (mode === "typewriter") {
+    mode = seed.text === 1 ? "bounce" : seed.text === 2 ? "word" : "typewriter";
+  }
 
   if (mode === "fade") {
     ctx.save();
@@ -685,7 +717,7 @@ function drawText(
     const visW = ctx.measureText(visible).width;
     if (visW > 2) {
       ctx.save();
-      ctx.fillStyle = "rgba(255, 214, 74, 0.38)";
+      ctx.fillStyle = seed.highlight;
       ctx.fillRect(x - 6, y - size * 0.48, visW + 12, size * 0.98);
       ctx.restore();
     }
@@ -853,12 +885,64 @@ function applyStrokeStyle(
   }
 }
 
-function drawScribblePath(ctx: CanvasRenderingContext2D, w: number, h: number, p: number) {
-  const rows = Math.max(8, Math.round(h / 42));
-  const shown = clamp(p, 0.02, 1) * rows;
+function drawScribblePath(ctx: CanvasRenderingContext2D, w: number, h: number, p: number, kind = 0) {
   ctx.beginPath();
   let x = 0;
   let y = h * 0.05;
+  if (kind === 1) {
+    const cols = Math.max(8, Math.round(w / 42));
+    const shown = clamp(p, 0.02, 1) * cols;
+    const whole = Math.floor(shown);
+    for (let col = 0; col <= whole && col < cols; col++) {
+      const even = col % 2 === 0;
+      x = ((col + 0.5) / cols) * w;
+      const y0 = even ? -h * 0.06 : h * 1.06;
+      const y1 = even ? h * 1.06 : -h * 0.06;
+      const frac = col < whole ? 1 : shown - whole;
+      const yEnd = y0 + (y1 - y0) * frac;
+      ctx.moveTo(x, y0);
+      ctx.quadraticCurveTo(x + (even ? 1 : -1) * Math.min(8, w * 0.012), (y0 + yEnd) / 2, x, yEnd);
+      y = yEnd;
+    }
+    return { x: clamp(x, 0, w), y: clamp(y, 0, h) };
+  }
+  if (kind === 2) {
+    const rows = Math.max(8, Math.round(h / 42));
+    const shown = clamp(p, 0.02, 1) * rows;
+    const whole = Math.floor(shown);
+    for (let row = 0; row <= whole && row < rows; row++) {
+      const even = row % 2 === 0;
+      y = ((row + 0.5) / rows) * h;
+      const x0 = even ? w * 1.06 : -w * 0.06;
+      const x1 = even ? -w * 0.06 : w * 1.06;
+      const frac = row < whole ? 1 : shown - whole;
+      const xEnd = x0 + (x1 - x0) * frac;
+      ctx.moveTo(x0, y);
+      ctx.quadraticCurveTo((x0 + xEnd) / 2, y + (even ? -1 : 1) * Math.min(8, h * 0.012), xEnd, y);
+      x = xEnd;
+    }
+    return { x: clamp(x, 0, w), y: clamp(y, 0, h) };
+  }
+  if (kind === 3) {
+    const steps = Math.max(10, Math.round((w + h) / 55));
+    const shown = clamp(p, 0.02, 1) * steps;
+    const whole = Math.floor(shown);
+    for (let i = 0; i <= whole && i < steps; i++) {
+      const u = (i + 0.5) / steps;
+      const y0 = u * h * 1.15 - h * 0.08;
+      const x0 = -w * 0.08;
+      const x1 = w * 1.08;
+      const frac = i < whole ? 1 : shown - whole;
+      const xEnd = x0 + (x1 - x0) * frac;
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(xEnd, y0 + (xEnd - x0) * 0.18);
+      x = xEnd;
+      y = y0;
+    }
+    return { x: clamp(x, 0, w), y: clamp(y, 0, h) };
+  }
+  const rows = Math.max(8, Math.round(h / 42));
+  const shown = clamp(p, 0.02, 1) * rows;
   const whole = Math.floor(shown);
   for (let row = 0; row <= whole && row < rows; row++) {
     const even = row % 2 === 0;
@@ -882,6 +966,7 @@ function scribbleReveal(
   w: number,
   h: number,
   p: number,
+  kind = 0,
 ) {
   if (typeof document === "undefined") {
     ctx.drawImage(bitmap, 0, 0, w, h);
@@ -901,7 +986,7 @@ function scribbleReveal(
   t.lineCap = "round";
   t.lineJoin = "round";
   t.lineWidth = Math.max(18, mh / Math.max(8, Math.round(mh / 42))) * 1.7;
-  const tip = drawScribblePath(t, mw, mh, p);
+  const tip = drawScribblePath(t, mw, mh, p, kind);
   t.stroke();
   t.globalCompositeOperation = "source-in";
   t.drawImage(bitmap, 0, 0, mw, mh);
@@ -914,6 +999,7 @@ function drawImageLayer(
   ctx: CanvasRenderingContext2D,
   prep: PreparedLayer,
   p: number,
+  seed = sceneSeed(0),
 ): { x: number; y: number; style: Layer["anim"]["hand"] } | null {
   const layer = prep.layer;
   const anim = resolveAnim(layer.anim);
@@ -921,7 +1007,7 @@ function drawImageLayer(
   const scribbleOn =
     anim.style === "scribble" || anim.style === "scanner" || anim.style === "zigzag" || anim.style === "contour";
   if (scribbleOn) {
-    const tip = scribbleReveal(ctx, bitmap, layer.width, layer.height, Math.max(p, 0.04));
+    const tip = scribbleReveal(ctx, bitmap, layer.width, layer.height, Math.max(p, 0.04), seed.scribble);
     if (p >= 1) {
       ctx.drawImage(bitmap, 0, 0, layer.width, layer.height);
       return null;
