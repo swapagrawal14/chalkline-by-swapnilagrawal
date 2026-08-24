@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { exportPng, exportWebm, renderThumb } from "@/lib/animation/export";
+import { exportMovie, exportPng, renderThumb, type VideoFormat } from "@/lib/animation/export";
 import { localTime, prepareProject, type PreparedProject } from "@/lib/animation/engine";
 import {
   iconLayer,
@@ -90,7 +90,7 @@ type StudioState = {
   addCaption: () => void;
   sliceSelected: (cols: number, rows: number) => Promise<void>;
   persist: () => Promise<void>;
-  exportVideo: () => Promise<void>;
+  exportVideo: (format?: VideoFormat) => Promise<void>;
   exportStill: () => Promise<void>;
   dismissTour: () => void;
   applyBackground: (bg: Project["background"]) => void;
@@ -648,12 +648,13 @@ export const useStudio = create<StudioState>((set, get) => ({
     await get().refreshMetas();
   },
 
-  exportVideo: async () => {
+  exportVideo: async (format = "mp4") => {
     const project = get().project;
     if (!project) return;
     set({ exporting: true, exportProgress: 0, playing: false });
     try {
-      await exportWebm(project, {
+      await exportMovie(project, {
+        format,
         onProgress: (p) => set({ exportProgress: p }),
       });
     } finally {

@@ -149,7 +149,8 @@ There is no cloud sync and no account.
 ## Export notes
 
 - **PNG** — last frame of the board, downloads immediately.
-- **WebM** — records the canvas at 30 fps. Stay on the tab; backgrounding can drop frames. Chromium is the most reliable encoder. If export fails, try Chrome/Edge.
+- **MP4** and **WebM** — Export menu in the studio header. Both mix in the **music bed** (and tick SFX if you turned that on). Chromium / Chrome / Edge encode most reliably. Keep the tab open while it encodes.
+- If a board has no music file, the video is silent — attach a music bed in the inspector before exporting.
 - Resolution follows the board setting (720p / 1080p / 1440p) and aspect (16:9, 9:16, 1:1, 4:5, 21:9).
 - Captions and the drawing hand are burned into the video. Presenter notes are not.
 

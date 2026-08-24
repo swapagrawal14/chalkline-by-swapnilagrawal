@@ -295,7 +295,6 @@ function StudioHeader() {
   const redo = useStudio((s) => s.redo);
   const playing = useStudio((s) => s.playing);
   const togglePlay = useStudio((s) => s.togglePlay);
-  const exportVideo = useStudio((s) => s.exportVideo);
   const exportStill = useStudio((s) => s.exportStill);
   const persist = useStudio((s) => s.persist);
   const dirty = useStudio((s) => s.dirty);
@@ -397,19 +396,55 @@ function StudioHeader() {
         >
           PNG
         </Button>
-        <Button
-          size="sm"
-          onClick={() => {
-            void exportVideo()
-              .then(() => toast.success("Video downloaded"))
-              .catch(() => toast.error("Could not export video in this browser"));
-          }}
-        >
-          <Download />
-          <span className="hidden sm:inline">Export</span>
-        </Button>
+        <ExportMenu />
       </div>
     </header>
+  );
+}
+
+function ExportMenu() {
+  const exportVideo = useStudio((s) => s.exportVideo);
+  const project = useStudio((s) => s.project);
+  const [open, setOpen] = useState(false);
+  const hasSound = Boolean(project?.musicSrc) || Boolean(project?.sfx);
+
+  async function run(format: "mp4" | "webm") {
+    setOpen(false);
+    try {
+      await exportVideo(format);
+      toast.success(format === "mp4" ? "MP4 downloaded" : "WebM downloaded");
+    } catch {
+      toast.error("Could not export video in this browser");
+    }
+  }
+
+  return (
+    <div className="relative">
+      <Button size="sm" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <Download />
+        <span className="hidden sm:inline">Export</span>
+      </Button>
+      {open ? (
+        <div className="absolute right-0 z-30 mt-1 w-56 rounded-md border border-line bg-elevated p-1 shadow-pop">
+          <button
+            type="button"
+            className="flex w-full flex-col items-start rounded-sm px-3 py-2 text-left hover:bg-paper-deep"
+            onClick={() => void run("mp4")}
+          >
+            <span className="text-sm font-medium">MP4 video</span>
+            <span className="text-[11px] text-muted">{hasSound ? "Includes music bed" : "Picture only — add a music bed for sound"}</span>
+          </button>
+          <button
+            type="button"
+            className="flex w-full flex-col items-start rounded-sm px-3 py-2 text-left hover:bg-paper-deep"
+            onClick={() => void run("webm")}
+          >
+            <span className="text-sm font-medium">WebM video</span>
+            <span className="text-[11px] text-muted">{hasSound ? "Includes music bed" : "Picture only — add a music bed for sound"}</span>
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -977,8 +1012,10 @@ function Inspector() {
             }}
           />
           {project.musicName ? (
-            <p className="mt-1 text-xs text-muted">{project.musicName}</p>
-          ) : null}
+            <p className="mt-1 text-xs text-muted">{project.musicName} · mixed into MP4 / WebM</p>
+          ) : (
+            <p className="mt-1 text-xs text-muted">Attach a track to hear it in the exported video.</p>
+          )}
         </div>
         <div className="mt-3">
           <Label>Scene transition</Label>
@@ -1712,8 +1749,8 @@ function ExportOverlay() {
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink/45">
       <div className="w-80 rounded-xl bg-elevated p-6 text-center shadow-pop">
         <Clapperboard className="mx-auto mb-3" />
-        <p className="font-display text-xl">Recording the board</p>
-        <p className="mt-1 text-sm text-muted">Keep this tab visible while frames are captured.</p>
+        <p className="font-display text-xl">Encoding the board</p>
+        <p className="mt-1 text-sm text-muted">Music on this board is mixed into the file. Keep the tab open.</p>
         <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-paper-deep">
           <div className="h-full bg-marker" style={{ width: `${Math.round(progress * 100)}%` }} />
         </div>
