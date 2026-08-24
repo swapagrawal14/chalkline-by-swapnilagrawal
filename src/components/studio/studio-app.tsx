@@ -102,6 +102,7 @@ const STYLE_LABELS: Record<AnimationStyle, string> = {
   diamond: "Diamond",
   scatter: "Scatter",
   columns: "Columns",
+  scribble: "Scribble",
 };
 
 export function StudioApp({ projectId }: { projectId?: string }) {
@@ -1033,9 +1034,14 @@ function Inspector() {
             label="Spotlight current layer"
           />
           <Switch
-            checked={Boolean(project.sfx)}
+            checked={project.sfx !== false}
             onChange={() => toggleFlag("sfx")}
-            label="Tick when a layer starts"
+            label="Marker sound"
+          />
+          <Switch
+            checked={project.scribe !== false}
+            onChange={() => toggleFlag("scribe")}
+            label="Camera follows the hand"
           />
           <Switch
             checked={scene.camera.enabled}

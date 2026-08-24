@@ -175,6 +175,7 @@ export function orderCells(cells: Cell[], style: AnimationStyle, cols: number, r
     case "wipe-right":
       return by((i) => colOf(i) * 1000 + rowOf(i));
     case "zigzag":
+    case "scribble":
       return idx.sort((a, b) => {
         const ra = rowOf(a);
         const rb = rowOf(b);

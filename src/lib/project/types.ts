@@ -40,6 +40,7 @@ export const ANIMATION_STYLES = [
   "diamond",
   "scatter",
   "columns",
+  "scribble",
 ] as const;
 
 export type AnimationStyle = (typeof ANIMATION_STYLES)[number];
@@ -259,6 +260,7 @@ export interface Project {
   grid: boolean;
   spotlight: boolean;
   sfx: boolean;
+  scribe: boolean;
 }
 
 export interface ProjectMeta {
@@ -272,20 +274,20 @@ export interface ProjectMeta {
 }
 
 export const DEFAULT_ANIM: AnimSettings = {
-  style: "scanner",
+  style: "scribble",
   drawStyle: "outline-fill",
   strokeStyle: "marker",
   hand: "right-marker",
-  speed: 1,
+  speed: 1.2,
   color: "#1C1916",
   fillReveal: "fade",
-  strokeWidth: 2.4,
-  sketchiness: 0.45,
-  easing: "ease",
+  strokeWidth: 2.8,
+  sketchiness: 0.55,
+  easing: "ease-out",
   entrance: "none",
   reverse: false,
-  wiggle: false,
-  dust: false,
+  wiggle: true,
+  dust: true,
   textAnim: "typewriter",
   after: "none",
 };

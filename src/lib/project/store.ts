@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { exportMovie, exportPng, renderThumb, type VideoFormat } from "@/lib/animation/export";
 import { localTime, prepareProject, type PreparedProject } from "@/lib/animation/engine";
+import { armSfx, playMarkerTap, setScratch } from "@/lib/animation/sfx";
 import {
   iconLayer,
   makeProject,
@@ -108,7 +109,7 @@ type StudioState = {
   applyLook: (id: string) => void;
   setPresenting: (v: boolean) => void;
   setShowHelp: (v: boolean) => void;
-  toggleFlag: (key: "snap" | "grid" | "spotlight" | "sfx") => void;
+  toggleFlag: (key: "snap" | "grid" | "spotlight" | "sfx" | "scribe") => void;
   exportJson: () => void;
   importJson: (file: File) => Promise<string | null>;
   stampClip: (id: string) => void;
@@ -122,28 +123,6 @@ function sceneOf(p: Project): Scene {
 
 function snapshot(p: Project) {
   return JSON.stringify(p);
-}
-
-let audioCtx: AudioContext | null = null;
-function playBlip() {
-  try {
-    const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (!AC) return;
-    if (!audioCtx) audioCtx = new AC();
-    const ctx = audioCtx;
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.type = "sine";
-    o.frequency.value = 640;
-    g.gain.value = 0.045;
-    o.connect(g);
-    g.connect(ctx.destination);
-    o.start();
-    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.07);
-    o.stop(ctx.currentTime + 0.07);
-  } catch {
-    /* ignore */
-  }
 }
 
 function patchPreparedPos(prepared: PreparedProject | null, id: string, x: number, y: number) {
@@ -338,15 +317,27 @@ export const useStudio = create<StudioState>((set, get) => ({
   setTool: (t) => set({ tool: t }),
   setLeftTab: (t) => set({ leftTab: t }),
 
-  play: () => set({ playing: true }),
-  pause: () => set({ playing: false }),
+  play: () => {
+    armSfx();
+    set({ playing: true });
+  },
+  pause: () => {
+    setScratch(false);
+    set({ playing: false });
+  },
   togglePlay: () => {
     const { playing, time, prepared } = get();
-    if (!playing && prepared && time >= prepared.duration - 0.05) {
+    if (playing) {
+      setScratch(false);
+      set({ playing: false });
+      return;
+    }
+    armSfx();
+    if (prepared && time >= prepared.duration - 0.05) {
       set({ time: 0, playing: true });
       return;
     }
-    set({ playing: !playing });
+    set({ playing: true });
   },
   seek: (t) => set({ time: Math.max(0, t), playing: false }),
   tick: (dt) => {
@@ -357,19 +348,32 @@ export const useStudio = create<StudioState>((set, get) => ({
     if (next >= prepared.duration) {
       if (project?.loop) next = 0;
       else {
+        setScratch(false);
         set({ time: prepared.duration, playing: false });
         return;
       }
     }
-    if (project?.sfx) {
+    if (project?.sfx !== false) {
       try {
         const loc = localTime(prepared, next);
+        let drawing = false;
         for (const layer of loc.scene.scene.layers) {
-          if (layer.visible && prev < layer.start && next >= layer.start) playBlip();
+          if (!layer.visible) continue;
+          if (prev < layer.start && next >= layer.start) playMarkerTap();
+          if (
+            next >= layer.start &&
+            next < layer.start + layer.duration &&
+            resolveAnim(layer.anim).hand !== "ghost"
+          ) {
+            drawing = true;
+          }
         }
+        setScratch(drawing);
       } catch {
         /* ignore */
       }
+    } else {
+      setScratch(false);
     }
     set({ time: next });
   },
@@ -814,7 +818,7 @@ export const useStudio = create<StudioState>((set, get) => ({
       (p) => {
         p[key] = !p[key];
       },
-      { prepare: key === "grid" || key === "spotlight" ? true : false },
+      { prepare: key === "grid" || key === "spotlight" || key === "scribe" ? true : false },
     );
   },
 

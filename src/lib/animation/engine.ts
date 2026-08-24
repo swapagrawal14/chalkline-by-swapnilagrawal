@@ -156,6 +156,54 @@ export function localTime(prepared: PreparedProject, time: number) {
   return { sceneIndex: prepared.scenes.length - 1, local: last.duration, scene: last };
 }
 
+function computeScribeCam(scene: PreparedScene, local: number, width: number, height: number) {
+  const layers = scene.layers.map((p) => p.layer).filter((l) => l.visible);
+  const fallback = { cx: width / 2, cy: height / 2, scale: 1 };
+  if (!layers.length) return fallback;
+
+  let current: Layer | null = null;
+  let previous: Layer | null = null;
+  let blend = 1;
+  for (const layer of layers) {
+    const end = layer.start + layer.duration;
+    if (local + 0.0001 < layer.start) break;
+    if (local < end) {
+      previous = current;
+      current = layer;
+      blend = clamp((local - layer.start) / 0.32, 0, 1);
+      break;
+    }
+    previous = current;
+    current = layer;
+    blend = 1;
+  }
+  if (!current) current = layers[0]!;
+
+  const from = previous ?? current;
+  const to = current;
+  const e = easeInOut(blend);
+  const cx = lerp(from.x + from.width / 2, to.x + to.width / 2, e);
+  const cy = lerp(from.y + from.height / 2, to.y + to.height / 2, e);
+  const fit = (layer: Layer) => {
+    const fw = Math.max(layer.width, 180) * 2.05;
+    const fh = Math.max(layer.height, 160) * 2.15;
+    return clamp(Math.min(width / fw, height / fh), 1.08, 1.72);
+  };
+  let scale = lerp(fit(from), fit(to), e);
+
+  const lastEnd = Math.max(...layers.map((l) => l.start + l.duration));
+  if (local > lastEnd) {
+    const k = easeInOut(clamp((local - lastEnd) / 0.55, 0, 1));
+    scale = lerp(scale, 1, k);
+    return {
+      cx: lerp(cx, width / 2, k),
+      cy: lerp(cy, height / 2, k),
+      scale,
+    };
+  }
+  return { cx, cy, scale };
+}
+
 export function renderFrame(
   ctx: CanvasRenderingContext2D,
   prepared: PreparedProject,
@@ -171,8 +219,14 @@ export function renderFrame(
   const { scene, local } = localTime(prepared, time);
   const transition = scene.scene.transition ?? "cut";
   const fadeFor = 0.45;
+  const useScribe = mode === "play" && project.scribe !== false;
 
-  if (scene.scene.camera.enabled && mode === "play") {
+  if (useScribe) {
+    const cam = computeScribeCam(scene, local, width, height);
+    ctx.translate(width / 2, height / 2);
+    ctx.scale(cam.scale, cam.scale);
+    ctx.translate(-cam.cx, -cam.cy);
+  } else if (scene.scene.camera.enabled && mode === "play") {
     const p = easeInOut(clamp(local / Math.max(0.001, scene.duration), 0, 1));
     const cam = scene.scene.camera;
     const scale = lerp(cam.fromScale, cam.toScale, p);
@@ -183,7 +237,7 @@ export function renderFrame(
     ctx.translate(-width / 2, -height / 2);
   }
 
-  let hand: { x: number; y: number; style: Layer["anim"]["hand"]; dust?: boolean } | null = null;
+  let hand: { x: number; y: number; style: Layer["anim"]["hand"]; dust?: boolean; lift?: number } | null = null;
 
   let sceneAlpha = 1;
   if (mode === "play" && transition !== "cut" && local < fadeFor) {
@@ -235,7 +289,15 @@ export function renderFrame(
     const raw = (local - start) / Math.max(0.001, layer.duration);
     const p = easeBy(anim.easing, clamp(raw * Math.max(0.25, anim.speed), 0, 1));
     const h = drawLayerPartial(ctx, prep, p, local);
-    if (h) hand = { ...h, dust: anim.dust };
+    if (h) {
+      const lift = p < 0.1 ? 1 - p / 0.1 : p > 0.9 ? (p - 0.9) / 0.1 : 0;
+      hand = { ...h, dust: anim.dust, lift };
+    }
+  }
+
+  if (mode === "play" && hand) {
+    drawHand(ctx, hand.x, hand.y, hand.style, 1.22, false, hand.lift ?? 0);
+    if (hand.dust) drawDust(ctx, hand.x, hand.y, local);
   }
 
   ctx.restore();
@@ -273,10 +335,6 @@ export function renderFrame(
       const span = Math.max(0.001, caption.end - caption.start);
       const capP = clamp((local - caption.start) / Math.min(0.7, span * 0.4), 0, 1);
       drawCaption(ctx, width, height, caption.text, project.background, capP);
-    }
-    if (hand) {
-      drawHand(ctx, hand.x, hand.y, hand.style, 0.92);
-      if (hand.dust) drawDust(ctx, hand.x, hand.y, local);
     }
   }
 }
@@ -386,7 +444,8 @@ function applyStyleClip(ctx: CanvasRenderingContext2D, layer: Layer, p: number) 
   const w = layer.width;
   const h = layer.height;
   ctx.beginPath();
-  if (style === "scanner" || style === "wipe-right" || style === "columns") ctx.rect(0, 0, w * Math.max(p, 0.02), h);
+  if (style === "scribble") ctx.rect(0, 0, w, h);
+  else if (style === "scanner" || style === "wipe-right" || style === "columns") ctx.rect(0, 0, w * Math.max(p, 0.02), h);
   else if (style === "wipe-left") ctx.rect(w * (1 - p), 0, w * Math.max(p, 0.02), h);
   else if (style === "wipe-down" || style === "rain") ctx.rect(0, 0, w, h * Math.max(p, 0.02));
   else if (style === "wipe-up") ctx.rect(0, h * (1 - p), w, h * Math.max(p, 0.02));
@@ -441,6 +500,13 @@ function drawLayerPartial(
   transformLayer(ctx, layer);
   applyEntrance(ctx, layer, p);
   if (p >= 1) applyAfter(ctx, layer, local);
+  if (p > 0.82 && p < 1) {
+    const u = (p - 0.82) / 0.18;
+    const s = 1 + Math.sin(u * Math.PI) * 0.065;
+    ctx.translate(layer.width / 2, layer.height / 2);
+    ctx.scale(s, s);
+    ctx.translate(-layer.width / 2, -layer.height / 2);
+  }
   if (anim.wiggle && p < 1) {
     ctx.translate(Math.sin(p * 42) * 1.4, Math.cos(p * 33) * 1.2);
     ctx.rotate(Math.sin(p * 21) * 0.015);
@@ -669,6 +735,11 @@ function drawPaths(
       ctx.stroke(p2d);
     } else {
       ctx.stroke(p2d);
+      if (sketch === "marker") {
+        ctx.globalAlpha *= 0.35;
+        ctx.lineWidth = sw + 1.6;
+        ctx.stroke(p2d);
+      }
     }
     ctx.restore();
     if (local > 0 && local <= path.length) {
@@ -719,6 +790,63 @@ function applyStrokeStyle(
   }
 }
 
+function drawScribblePath(ctx: CanvasRenderingContext2D, w: number, h: number, p: number) {
+  const rows = 8;
+  const cols = 6;
+  const total = rows * cols;
+  const shown = Math.max(1, total * clamp(p, 0.02, 1));
+  ctx.beginPath();
+  let prevX = 0;
+  let prevY = h * 0.08;
+  for (let i = 0; i <= shown; i++) {
+    const row = Math.floor(i / cols);
+    const colIn = i % cols;
+    const col = row % 2 === 0 ? colIn : cols - 1 - colIn;
+    const x = ((col + 0.5) / cols) * w + Math.sin(i * 1.71) * w * 0.045;
+    const y = ((row + 0.5) / rows) * h + Math.cos(i * 1.33) * h * 0.04;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.quadraticCurveTo(prevX, prevY, (prevX + x) / 2, (prevY + y) / 2);
+    prevX = x;
+    prevY = y;
+  }
+  return { x: prevX, y: prevY };
+}
+
+let maskCanvas: HTMLCanvasElement | null = null;
+function scribbleReveal(
+  ctx: CanvasRenderingContext2D,
+  bitmap: HTMLCanvasElement,
+  w: number,
+  h: number,
+  p: number,
+) {
+  if (typeof document === "undefined") {
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    return { x: w * p, y: h * 0.5 };
+  }
+  if (!maskCanvas) maskCanvas = document.createElement("canvas");
+  const mw = Math.max(1, Math.ceil(w));
+  const mh = Math.max(1, Math.ceil(h));
+  if (maskCanvas.width !== mw || maskCanvas.height !== mh) {
+    maskCanvas.width = mw;
+    maskCanvas.height = mh;
+  }
+  const t = maskCanvas.getContext("2d")!;
+  t.clearRect(0, 0, mw, mh);
+  t.save();
+  t.strokeStyle = "#fff";
+  t.lineCap = "round";
+  t.lineJoin = "round";
+  t.lineWidth = Math.max(mw, mh) * 0.3;
+  const tip = drawScribblePath(t, mw, mh, p);
+  t.stroke();
+  t.globalCompositeOperation = "source-in";
+  t.drawImage(bitmap, 0, 0, mw, mh);
+  t.restore();
+  ctx.drawImage(maskCanvas, 0, 0, w, h);
+  return tip;
+}
+
 function drawImageLayer(
   ctx: CanvasRenderingContext2D,
   prep: PreparedLayer,
@@ -726,9 +854,47 @@ function drawImageLayer(
 ): { x: number; y: number; style: Layer["anim"]["hand"] } | null {
   const layer = prep.layer;
   const anim = resolveAnim(layer.anim);
+  const bitmap = prep.bitmap!;
+  const scribbleOn =
+    anim.style === "scribble" || anim.style === "scanner" || anim.style === "zigzag" || anim.style === "contour";
+  if (scribbleOn) {
+    const sketchUntil = anim.drawStyle === "reveal" ? 0 : 0.42;
+    if (anim.drawStyle !== "reveal" && p < 1) {
+      const cells = prep.cells!;
+      const order = prep.order!;
+      const n = order.length;
+      const sketchCount = Math.floor(clamp(p / Math.max(0.001, sketchUntil), 0, 1) * n);
+      ctx.save();
+      ctx.strokeStyle = anim.color;
+      ctx.lineCap = "round";
+      applyStrokeStyle(ctx, anim.strokeStyle, anim.strokeWidth);
+      const jitter = anim.sketchiness * 2.2;
+      for (let i = 0; i < sketchCount; i++) {
+        const cell = cells[order[i]!]!;
+        for (const s of cell.strokes) {
+          const j = ((i * 17) % 5) - 2;
+          ctx.beginPath();
+          ctx.moveTo(s.x1 + j * jitter * 0.15, s.y1);
+          ctx.lineTo(s.x2 + j * jitter * 0.1, s.y2 + j * 0.2);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+    const fillP = anim.drawStyle === "outline" ? 0 : clamp((p - sketchUntil) / Math.max(0.001, 1 - sketchUntil), 0, 1);
+    if (fillP > 0) {
+      const tip = scribbleReveal(ctx, bitmap, layer.width, layer.height, Math.max(fillP, 0.04));
+      if (p >= 1) return null;
+      return { x: tip.x, y: tip.y, style: anim.hand };
+    }
+    if (p >= 1) {
+      ctx.drawImage(bitmap, 0, 0, layer.width, layer.height);
+      return null;
+    }
+    return { x: layer.width * p, y: layer.height * 0.45, style: anim.hand };
+  }
   const cells = prep.cells!;
   const order = anim.reverse ? [...prep.order!].reverse() : prep.order!;
-  const bitmap = prep.bitmap!;
   const style = anim.drawStyle;
   const sketchUntil = style === "reveal" ? 0 : style === "outline" ? 1 : 0.58;
   const n = order.length;

@@ -37,7 +37,8 @@ export function normalizeProject(raw: Project): Project {
   p.snap = Boolean(p.snap);
   p.grid = Boolean(p.grid);
   p.spotlight = Boolean(p.spotlight);
-  p.sfx = Boolean(p.sfx);
+  p.sfx = p.sfx !== false;
+  p.scribe = p.scribe !== false;
   p.loop = Boolean(p.loop);
   p.musicVolume = typeof p.musicVolume === "number" ? p.musicVolume : 0.4;
   p.notes = p.notes ?? "";

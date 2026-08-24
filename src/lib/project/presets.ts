@@ -10,6 +10,25 @@ export interface MotionPreset {
 
 export const MOTION_PRESETS: MotionPreset[] = [
   {
+    id: "scribe",
+    name: "Scribe",
+    blurb: "Marker hand + scribble + follow-cam",
+    anim: {
+      style: "scribble",
+      drawStyle: "outline-fill",
+      strokeStyle: "marker",
+      hand: "right-marker",
+      speed: 1.2,
+      sketchiness: 0.6,
+      easing: "ease-out",
+      entrance: "none",
+      wiggle: true,
+      dust: true,
+      fillReveal: "fade",
+      after: "none",
+    },
+  },
+  {
     id: "quick",
     name: "Quick reveal",
     blurb: "Fast scanner, no hand",

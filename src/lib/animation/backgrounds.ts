@@ -63,7 +63,7 @@ export function paintBackground(
     g.addColorStop(1, "rgba(214,200,170,0.18)");
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, width, height);
-    noise(ctx, width, height, 0.05);
+    noise(ctx, width, height, 0.09);
   }
 
   ctx.restore();

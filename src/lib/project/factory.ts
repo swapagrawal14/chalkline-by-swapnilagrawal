@@ -72,7 +72,8 @@ export function makeProject(name = "Untitled board"): Project {
     snap: false,
     grid: false,
     spotlight: false,
-    sfx: false,
+    sfx: true,
+    scribe: true,
   };
 }
 
