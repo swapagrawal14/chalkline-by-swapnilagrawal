@@ -32,6 +32,9 @@ export function HomePage() {
           <a href="#how" className="hidden px-3 py-2 text-ink-soft hover:text-ink md:inline">
             How it works
           </a>
+          <Link to="/developers" className="hidden px-3 py-2 text-ink-soft hover:text-ink md:inline">
+            API
+          </Link>
           <Button asChild variant="outline" size="sm">
             <Link to="/studio">Boards</Link>
           </Button>
@@ -59,7 +62,7 @@ export function HomePage() {
               <Link to="/studio">Start a board</Link>
             </Button>
             <Button asChild size="lg" variant="outline">
-              <a href="#how">See how it draws</a>
+              <Link to="/developers">Free API</Link>
             </Button>
           </div>
           <ul className="mt-8 flex flex-wrap gap-x-5 gap-y-2 text-sm text-muted">

@@ -170,6 +170,34 @@ Chalkline does not ship an AI key. If you want a model to *storyboard a board fo
 
 ---
 
+## Chalkline API (free, no key)
+
+Other websites call this the same way they call a temp-mail API. CORS is open. 60 requests / minute. Responses include `"service": "chalkline"`. **It does not spend Grok, OpenAI, or OpenRouter credits** — it only compiles a small recipe into a board JSON.
+
+**Base:** `/api/chalkline`  
+**Human guide:** `/developers` (written for vibe coders)
+
+### Efficient use (4 steps)
+
+1. `GET /api/chalkline?action=ping` — are we up?
+2. POST a **tiny** storyboard (layouts + titles + captions, no photos) to `/api/chalkline/boards` or `?action=createBoard`
+3. Save the `board` object as `.json`
+4. Studio → Import JSON → Play → Export WebM/MP4
+
+| Call | When |
+|---|---|
+| `GET ?action=ping` | Health |
+| `GET ?action=icons` | Icon ids |
+| `GET ?action=directing` | Agent rules |
+| `POST ?action=createBoard` | Recipe → board |
+| `POST ?action=validateBoard` | Lint a finished JSON |
+
+Do not send 10 MB photos through createBoard. Do not expect an MP4 back. Mix layouts so scenes don’t look copy-pasted.
+
+`/api/v1/*` still works as an alias.
+
+---
+
 ## Library clips
 
 Stamp these from the Library tab onto the current scene. They respect the board's aspect (portrait stacks, landscape spreads).
