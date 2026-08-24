@@ -3,8 +3,11 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, NativeSelect, Slider, Switch, Textarea } from "@/components/ui/field";
 import { MotionDock } from "@/components/studio/motion-dock";
 import { PresentMode, ShortcutsHelp } from "@/components/studio/overlays";
+import { AiDialog } from "@/components/studio/ai-dialog";
 import { ICON_CATEGORIES, ICONS } from "@/lib/animation/icons";
+import { CLIPS, CLIP_CATEGORIES } from "@/lib/project/clips";
 import { BOARD_LOOKS, INK_SWATCHES, MOTION_PRESETS } from "@/lib/project/presets";
+import { STARTER_TEMPLATES } from "@/lib/project/samples";
 import { sceneDuration } from "@/lib/project/factory";
 import { durationOf, useStudio } from "@/lib/project/store";
 import {
@@ -69,6 +72,7 @@ import {
   Type,
   Undo2,
   Upload,
+  Wand2,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -121,6 +125,9 @@ export function StudioApp({ projectId }: { projectId?: string }) {
   const setShowHelp = useStudio((s) => s.setShowHelp);
   const copyMotion = useStudio((s) => s.copyMotion);
   const pasteMotion = useStudio((s) => s.pasteMotion);
+
+  const [aiOpen, setAiOpen] = useState(false);
+  const applyGenerated = useStudio((s) => s.applyGenerated);
 
   useEffect(() => {
     void init();
@@ -268,7 +275,7 @@ export function StudioApp({ projectId }: { projectId?: string }) {
 
   return (
     <div className="paper-grain flex h-dvh flex-col overflow-hidden text-ink">
-      <StudioHeader />
+      <StudioHeader onAskAi={() => setAiOpen(true)} />
       <div className="flex min-h-0 flex-1">
         <LeftRail />
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -278,17 +285,23 @@ export function StudioApp({ projectId }: { projectId?: string }) {
         <Inspector />
       </div>
       <Timeline />
-      <MobileBar />
+      <MobileBar onAskAi={() => setAiOpen(true)} />
       <Tour />
       <ExportOverlay />
       <MusicSync />
       <PresentMode />
       <ShortcutsHelp />
+      <AiDialog
+        open={aiOpen}
+        mode="replace"
+        onClose={() => setAiOpen(false)}
+        onApply={(p) => applyGenerated(p)}
+      />
     </div>
   );
 }
 
-function StudioHeader() {
+function StudioHeader({ onAskAi }: { onAskAi: () => void }) {
   const project = useStudio((s) => s.project)!;
   const rename = useStudio((s) => s.rename);
   const undo = useStudio((s) => s.undo);
@@ -354,7 +367,7 @@ function StudioHeader() {
           {playing ? <Pause /> : <Play />}
           <span className="hidden sm:inline">{playing ? "Pause" : "Play"}</span>
         </Button>
-        <div className="hidden items-center rounded-sm border border-line md:flex">
+        <div className="hidden items-center rounded-sm border border-line xl:flex">
           {[0.5, 1, 1.5, 2].map((n) => (
             <button
               key={n}
@@ -368,6 +381,15 @@ function StudioHeader() {
             </button>
           ))}
         </div>
+        <Button
+          size="sm"
+          variant="marker"
+          className="hidden md:inline-flex"
+          onClick={onAskAi}
+        >
+          <Wand2 />
+          Ask AI
+        </Button>
         <Button
           size="sm"
           variant="outline"
@@ -674,16 +696,50 @@ function LibraryPanel() {
   const addIcon = useStudio((s) => s.addIcon);
   const addShape = useStudio((s) => s.addShape);
   const addArrow = useStudio((s) => s.addArrow);
+  const stampClip = useStudio((s) => s.stampClip);
   const [cat, setCat] = useState<(typeof ICON_CATEGORIES)[number] | "all">("all");
+  const [clipCat, setClipCat] = useState<(typeof CLIP_CATEGORIES)[number] | "all">("all");
   const [q, setQ] = useState("");
   const items = ICONS.filter((i) => {
     if (cat !== "all" && i.category !== cat) return false;
     if (q && !i.name.toLowerCase().includes(q.toLowerCase()) && !i.id.includes(q.toLowerCase())) return false;
     return true;
   });
+  const clips = CLIPS.filter((c) => clipCat === "all" || c.category === clipCat);
 
   return (
     <div className="flex flex-col gap-3">
+      <div>
+        <Label>Ready-made clips</Label>
+        <p className="mt-1 mb-2 text-xs text-muted">Stamp a whole composition onto this scene.</p>
+        <NativeSelect
+          value={clipCat}
+          onChange={(e) => setClipCat(e.target.value as typeof clipCat)}
+        >
+          <option value="all">All clips</option>
+          {CLIP_CATEGORIES.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </NativeSelect>
+        <div className="mt-2 grid grid-cols-2 gap-1.5">
+          {clips.map((clip) => (
+            <button
+              key={clip.id}
+              type="button"
+              onClick={() => {
+                stampClip(clip.id);
+                toast.success(`Stamped ${clip.name}`);
+              }}
+              className="rounded-md border border-line bg-elevated px-2 py-2 text-left hover:border-marker"
+            >
+              <span className="block text-sm font-medium">{clip.name}</span>
+              <span className="block text-[11px] text-muted">{clip.blurb}</span>
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="flex flex-wrap gap-1">
         <Button size="sm" variant="outline" onClick={() => addShape("rect")}>
           <Square className="size-3.5" /> Box
@@ -1621,7 +1677,7 @@ function Timeline() {
   );
 }
 
-function MobileBar() {
+function MobileBar({ onAskAi }: { onAskAi: () => void }) {
   const playing = useStudio((s) => s.playing);
   const togglePlay = useStudio((s) => s.togglePlay);
   const addText = useStudio((s) => s.addText);
@@ -1671,6 +1727,13 @@ function MobileBar() {
         </button>
         <button
           className="flex flex-col items-center gap-0.5 text-[10px] uppercase tracking-wider text-muted"
+          onClick={onAskAi}
+        >
+          <Wand2 className="size-5" />
+          AI
+        </button>
+        <button
+          className="flex flex-col items-center gap-0.5 text-[10px] uppercase tracking-wider text-muted"
           onClick={() => {
             setLeftTab("layers");
             setOpen(open === "layers" ? null : "layers");
@@ -1711,8 +1774,8 @@ function Tour() {
       body: "Fourteen packs sit in the strip: sketch artist, chalk talk, rain, kinetic, typewriter. Tap a pack, then Play.",
     },
     {
-      title: "Play, present, export",
-      body: "Space plays. F presents. Export a WebM of the drawing, or a PNG of the final frame. Everything stays on this device.",
+      title: "Clips, a model, then a film",
+      body: "Stamp a title card or three-step from the library. Or connect your own LLM and ask for a 1-minute 9:16 board. Space plays. Export MP4 or WebM.",
     },
   ];
   const s = steps[step]!;
@@ -1787,8 +1850,10 @@ function ProjectPicker() {
   const createFromTemplate = useStudio((s) => s.createFromTemplate);
   const removeProject = useStudio((s) => s.removeProject);
   const importJson = useStudio((s) => s.importJson);
+  const createFromGenerated = useStudio((s) => s.createFromGenerated);
   const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
+  const [aiOpen, setAiOpen] = useState(false);
 
   return (
     <div className="paper-grain min-h-dvh">
@@ -1798,6 +1863,9 @@ function ProjectPicker() {
           Chalkline
         </Link>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setAiOpen(true)}>
+            <Wand2 /> Ask AI
+          </Button>
           <Button variant="outline" onClick={() => fileRef.current?.click()}>
             Import JSON
           </Button>
@@ -1831,10 +1899,10 @@ function ProjectPicker() {
       <main className="mx-auto max-w-5xl px-6 pb-16">
         <h1 className="font-display text-4xl">Your boards</h1>
         <p className="mt-2 max-w-xl text-ink-soft">
-          Saved privately in this browser. Start from a template or a blank page.
+          Saved privately in this browser. Start from a template, a blank page, or ask a model you connect.
         </p>
-        <div className="mt-8 grid gap-4 sm:grid-cols-3">
-          {STARTER_MINI.map((t) => (
+        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {STARTER_TEMPLATES.map((t) => (
             <button
               key={t.id}
               onClick={() => {
@@ -1875,12 +1943,16 @@ function ProjectPicker() {
           ))}
         </ul>
       </main>
+      <AiDialog
+        open={aiOpen}
+        mode="create"
+        onClose={() => setAiOpen(false)}
+        onApply={(p) => {
+          void createFromGenerated(p).then((id) => {
+            void navigate({ to: "/studio", search: { p: id } });
+          });
+        }}
+      />
     </div>
   );
 }
-
-const STARTER_MINI = [
-  { id: "meet", title: "Product intro", blurb: "Hook, three steps, close." },
-  { id: "water", title: "Science diagram", blurb: "A classroom cycle with icons." },
-  { id: "startup", title: "Growth loop", blurb: "Four beats of a product story." },
-];

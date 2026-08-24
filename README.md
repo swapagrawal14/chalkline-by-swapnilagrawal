@@ -13,6 +13,9 @@ Inspired by tools like [Inkplainer](https://inkplainer.pages.dev/), built as a f
 Explainer clips, classroom diagrams, product intros, science cycles, growth loops — anything that benefits from watching a board get drawn.
 
 - **Layers** — text, icons, photos, boxes, ovals, arrows, highlights, speech bubbles, callouts
+- **Library** — 90+ line icons (including medical), plus stampable clips: title cards, three steps, compare, timeline, cycle, quotes, stats, lists, Q&A, funnel, anatomy
+- **Templates** — product intro, science cycle, growth loop, Caldwell-Luc overview, how-to method, old vs new, short history, two questions
+- **Optional AI** — connect any OpenAI-compatible API; prompt a film and it lands on the canvas
 - **23 drawing orders** — scanner, zigzag, contour, spiral, radial, chunks, wipes, diagonal, reverse spiral, edges-first, subject-aware (portrait / human / landscape / building / vehicle), checker, rain, diamond, scatter, columns
 - **14 motion packs** on a strip under the canvas — quick reveal, sketch artist, blueprint, chalk talk, pop, story hand, spiral, comic, rain, kinetic, vintage, diamond, typewriter, bounce stack
 - **Stroke & hand** — marker, charcoal, sketch, fountain, chalk · right / left / pen / chalk / ghost (no hand)
@@ -35,7 +38,7 @@ Explainer clips, classroom diagrams, product intros, science cycles, growth loop
 | **Browser** | Chromium / Chrome / Edge recommended. Firefox and Safari work for editing; WebM export uses `MediaRecorder` and is most reliable in Chromium. |
 | **OS** | macOS, Windows, Linux |
 
-No database, no API keys, no sign-in. Optional music is a file you pick locally.
+No database, no sign-in. Optional music is a file you pick locally. Optional AI uses **your** model endpoint and key, stored only in this browser.
 
 ---
 
@@ -65,7 +68,7 @@ Then open **http://localhost:8080** in your browser.
 | `/studio` | Your boards (templates + saved work) |
 | `/studio?p=<id>` | Open a specific board |
 
-First visit seeds three starter templates (product intro, science diagram, growth loop).
+First visit seeds starter templates (product intro, science diagram, growth loop, Caldwell-Luc overview, how-to, compare, timeline, FAQ).
 
 ### Production build
 
@@ -83,7 +86,7 @@ Preview serves the built app on **http://127.0.0.1:8081**.
 ## Using the studio
 
 1. **Open studio** → New board, or start from a template.
-2. **Add pieces** — Text, Image (or drop a PNG/JPEG/WebP/GIF/SVG on the stage), icons from the library, shapes, arrows, speech bubbles.
+2. **Add pieces** — Text, Image (or drop a PNG/JPEG/WebP/GIF/SVG on the stage), icons from the library, **ready-made clips** (title card, steps, compare…), shapes, arrows, speech bubbles.
 3. **Compose** — drag on the board. Arrow keys nudge (Shift = 10px). Align / flip in the inspector.
 4. **Animate** — tap a **motion pack** under the canvas. With a layer selected it styles that layer; with nothing selected it paints the whole scene. Tune style, stroke, hand, easing, entrance, speed, sketchiness in the inspector (desktop) or the **Motion** tab (phone).
 5. **Sequence** — auto-sequence, or set start/duration per layer. Add scenes along the timeline. Pick a scene transition.
@@ -146,6 +149,52 @@ There is no cloud sync and no account.
 
 ---
 
+## Optional AI (bring your own model)
+
+Chalkline does not ship an AI key. If you want a model to *storyboard a board for you*:
+
+1. Studio header **Ask AI**, or the same button on the boards list.
+2. Open **Connection**. Default preset is **OpenRouter / free** — paste an [OpenRouter](https://openrouter.ai/keys) key. The studio calls `openrouter/free`, which picks a live free model and hops to another if one is busy. Other presets: OpenAI, Groq, Together, Ollama, LM Studio, custom.
+3. Prompt in plain language, e.g. `Make a 1 minute video on the Caldwell-Luc procedure in 9:16`.
+4. The model returns a storyboard JSON. Chalkline lays scenes, icons, captions, and timing onto the canvas. Edit anything after.
+
+**Compatibility.** Any server that speaks `POST {base}/chat/completions` (OpenAI Chat Completions). Path defaults to `/chat/completions`; change it if yours differs.
+
+**Where the key lives.** `localStorage` key `chalkline:llm` on this origin only. It is sent to the URL you typed — not to a Chalkline account. If the browser blocks the request (CORS, common with `api.openai.com`), the app retries through a same-origin `/api/llm` forwarder that does not store the key.
+
+**Ollama / LM Studio.** Run locally, pick the matching preset. A dummy key like `ollama` is enough when the server ignores auth.
+
+**What the model is allowed to do.** Educational whiteboard scenes — short titles, icons from the library, captions. It cannot invent new icon artwork or upload photos. Medical / technical prompts stay high-level overviews, not operational instructions.
+
+**If generation fails.** Test connection first. Check base URL (include `/v1` for OpenAI-shaped APIs), model id, and that the key is valid. Local models need the app opened on the same machine as Ollama.
+
+---
+
+## Library clips
+
+Stamp these from the Library tab onto the current scene. They respect the board's aspect (portrait stacks, landscape spreads).
+
+| Clip | What you get |
+|---|---|
+| Title card | Headline, supporting line, icon |
+| Three steps | Icon + label row (or stack) |
+| Four grid | 2×2 beats |
+| Compare | Before / after |
+| Timeline | Four sequential beats |
+| Cycle | Four stages around a center |
+| Quote | Speech bubble + attribution |
+| Stats | Three numbers |
+| Numbered list | Five lines |
+| Q & A | Question then answer |
+| Callout | Warning + note |
+| Close | Check + takeaway |
+| Anatomy | Central icon + labels |
+| Funnel | Wide-to-narrow stages |
+
+Icons cover objects, people, nature, charts, science, business, **medical** (scalpel, sinus, lungs, stethoscope, …), and UI marks.
+
+---
+
 ## Export notes
 
 - **PNG** — last frame of the board, downloads immediately.
@@ -167,7 +216,8 @@ src/
     board/                canvas + autoplay demo
   lib/
     animation/            engine, cell orders, hands, icons, WebM/PNG export
-    project/              types, store (Zustand), IndexedDB, templates, presets
+    project/              types, store (Zustand), IndexedDB, templates, clips, presets
+    ai/                   optional OpenAI-compatible client, storyboard compiler
 public/                   favicon, OG image
 ```
 

@@ -7,6 +7,7 @@ import {
   type Layer,
   type Project,
   type Scene,
+  type ShapeKind,
 } from "./types";
 
 export function defaultAnim(partial?: Partial<AnimSettings>): AnimSettings {
@@ -135,6 +136,64 @@ export function sequenceLayers(layers: Layer[], gap = 0.18) {
     t += layer.duration + gap;
   });
   return layers;
+}
+
+export function staggerLayers(layers: Layer[], gap = 0.55) {
+  let t = 0.2;
+  layers.forEach((layer, i) => {
+    layer.order = i;
+    layer.start = t;
+    t += gap;
+  });
+  return layers;
+}
+
+export function shapeLayer(
+  kind: ShapeKind,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  opts?: Partial<Layer>,
+): Layer {
+  return makeLayer({
+    type: "shape",
+    name: kind,
+    x,
+    y,
+    width,
+    height,
+    duration: 1.6,
+    shape: {
+      kind,
+      fill: kind === "highlight" ? "rgba(31,78,121,0.2)" : "transparent",
+      stroke: "#1C1916",
+      strokeWidth: 3,
+    },
+    anim: defaultAnim({ style: "contour", drawStyle: "outline" }),
+    ...opts,
+  });
+}
+
+export function arrowLayer(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  opts?: Partial<Layer>,
+): Layer {
+  return makeLayer({
+    type: "arrow",
+    name: "Arrow",
+    x,
+    y,
+    width,
+    height,
+    duration: 1.4,
+    arrow: { x2: width, y2: height / 2, color: "#1C1916", strokeWidth: 3, dashed: false },
+    anim: defaultAnim({ style: "wipe-right", drawStyle: "outline" }),
+    ...opts,
+  });
 }
 
 export function sceneDuration(scene: Scene) {

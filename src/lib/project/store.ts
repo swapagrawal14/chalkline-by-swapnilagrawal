@@ -20,6 +20,7 @@ import {
 } from "./persist";
 import { STARTER_TEMPLATES } from "./samples";
 import { BOARD_LOOKS, MOTION_PRESETS } from "./presets";
+import { getClip } from "./clips";
 import type { AnimSettings, Layer, Project, ProjectMeta, Scene, ShapeKind } from "./types";
 import { canvasSize, resolveAnim } from "./types";
 import { downloadBlob, uid } from "@/lib/utils";
@@ -110,6 +111,9 @@ type StudioState = {
   toggleFlag: (key: "snap" | "grid" | "spotlight" | "sfx") => void;
   exportJson: () => void;
   importJson: (file: File) => Promise<string | null>;
+  stampClip: (id: string) => void;
+  applyGenerated: (generated: Project) => void;
+  createFromGenerated: (generated: Project) => Promise<string>;
 };
 
 function sceneOf(p: Project): Scene {
@@ -834,6 +838,52 @@ export const useStudio = create<StudioState>((set, get) => ({
     } catch {
       return null;
     }
+  },
+
+  stampClip: (id) => {
+    const clip = getClip(id);
+    const project = get().project;
+    if (!clip || !project) return;
+    const size = canvasSize(project);
+    const built = clip.build(size);
+    get().mutate((p) => {
+      const s = sceneOf(p);
+      const end = Math.max(0, ...s.layers.map((l) => l.start + l.duration));
+      for (const layer of built.layers) {
+        layer.start += end;
+        s.layers.push(layer);
+      }
+      if (built.captions) {
+        for (const c of built.captions) {
+          s.captions.push({ ...c, start: c.start + end, end: c.end + end });
+        }
+      }
+      const last = built.layers[built.layers.length - 1];
+      if (last) set({ selectedId: last.id });
+    });
+  },
+
+  applyGenerated: (generated) => {
+    get().mutate((p) => {
+      p.name = generated.name;
+      p.aspect = generated.aspect;
+      p.background = generated.background;
+      p.solidColor = generated.solidColor;
+      p.notes = generated.notes;
+      p.scenes = generated.scenes;
+      p.activeSceneId = generated.scenes[0]?.id ?? p.activeSceneId;
+    });
+    set({ time: 0, selectedId: null, playing: false });
+  },
+
+  createFromGenerated: async (generated) => {
+    const project: Project = JSON.parse(JSON.stringify(generated));
+    project.id = uid("pr");
+    project.createdAt = Date.now();
+    project.updatedAt = Date.now();
+    await saveProject(project);
+    await get().refreshMetas();
+    return project.id;
   },
 }));
 

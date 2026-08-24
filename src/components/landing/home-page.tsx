@@ -9,6 +9,7 @@ import {
   Lock,
   Scissors,
   Sparkles,
+  Wand2,
 } from "lucide-react";
 import { useMemo } from "react";
 
@@ -50,8 +51,8 @@ export function HomePage() {
           </h1>
           <p className="mt-5 max-w-md text-lg leading-relaxed text-ink-soft">
             Turn diagrams, photos, and copy into explainer films. Twenty-three drawing
-            orders, fourteen motion packs, present mode, and WebM export — all
-            on this device.
+            orders, a full icon library, ready-made clips, and optional AI that talks to
+            the model you connect — all on this device.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Button asChild size="lg">
@@ -124,7 +125,7 @@ export function HomePage() {
 
       <section className="mx-auto max-w-6xl px-5 py-16">
         <h2 className="font-display text-3xl">Start from a template</h2>
-        <div className="mt-6 grid gap-4 sm:grid-cols-3">
+        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {STARTER_TEMPLATES.map((t) => (
             <Link
               key={t.id}
@@ -169,6 +170,11 @@ const FEATURES = [
     body: "Upload a PNG or JPEG, run sketch / ink / poster filters, then reveal it in bands, a spiral, rain, or a contour trace.",
   },
   {
+    icon: Wand2,
+    title: "Ask your own model",
+    body: "Optional. Paste any OpenAI-compatible base URL and key. Prompt a minute-long portrait film — the board appears on the canvas.",
+  },
+  {
     icon: Lock,
     title: "Private by default",
     body: "No sign-in. Boards live in this browser. Presenter notes stay off the export. JSON import if you move machines.",
@@ -201,4 +207,6 @@ const EXTRAS = [
   "Speech bubbles, callouts, image slicer, sketch/ink/poster filters",
   "Stagger timing, faster/slower scene, duplicate scene, JSON import/export",
   "Lower-third captions, Ken Burns, music bed, optional tick SFX",
+  "Library clips: title cards, steps, compare, timeline, cycle, quotes, stats, Q&A",
+  "Optional AI: your OpenAI-compatible URL + key; the model storyboards onto the canvas",
 ];
